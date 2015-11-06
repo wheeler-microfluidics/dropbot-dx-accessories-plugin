@@ -4,8 +4,8 @@ import yaml
 from microdrop_utility import Version
 from path_helpers import path
 
-package_name = 'analyst_remote_plugin'
-plugin_name = 'wheelerlab.analyst_remote_plugin'
+package_name = 'dropbot_dx_plugin'
+plugin_name = 'wheelerlab.dropbot_dx_plugin'
 
 # create a version sting based on the git revision/branch
 version = str(Version.from_git_repository())

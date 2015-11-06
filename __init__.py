@@ -1,22 +1,23 @@
 """
-Copyright 2014 Ryan Fobel
+Copyright 2015 Christian Fobel
 
-This file is part of analyst_remote_plugin.
+This file is part of dropbot_dx_plugin.
 
-analyst_remote_plugin is free software: you can redistribute it and/or modify
+dropbot_dx_plugin is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
-dmf_control_board is distributed in the hope that it will be useful,
+dropbot_dx_plugin is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with analyst_remote_plugin.  If not, see <http://www.gnu.org/licenses/>.
+along with dropbot_dx_plugin.  If not, see <http://www.gnu.org/licenses/>.
 """
 import sys, traceback
+from functools import wraps
 
 from path_helpers import path
 from flatland import Integer, Boolean, Form, String
@@ -27,13 +28,27 @@ from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
                                       implements, emit_signal)
 from microdrop.app_context import get_app
-from analyst_remote_control import AnalystRemoteControl
+from dropbot_dx import connect
+from dstat_remote import DstatRemote
 import gobject
 
 
 PluginGlobals.push_env('microdrop.managed')
 
-class AnalystRemotePlugin(Plugin, AppDataController, StepOptionsController):
+
+def is_connected(_lambda):
+    def wrapper(f):
+        @wraps(f)
+        def wrapped(self, *f_args, **f_kwargs):
+            if not self.connected():
+                logger.warning('Dropbot DX not connected.')
+            else:
+                f(self, *f_args, **f_kwargs)
+        return wrapped
+    return wrapper(_lambda)
+
+
+class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
     """
     This class is automatically registered with the PluginManager.
     """
@@ -57,8 +72,7 @@ class AnalystRemotePlugin(Plugin, AppDataController, StepOptionsController):
             config file, in a section named after this plugin's name attribute
     '''
     AppFields = Form.of(
-        String.named('subscribe_uri').using(optional=True),
-        String.named('request_uri').using(optional=True),
+        String.named('dstat_uri').using(default='', optional=True),
     )
 
     '''
@@ -76,13 +90,33 @@ class AnalystRemotePlugin(Plugin, AppDataController, StepOptionsController):
         -the values of these fields will be stored persistently for each step
     '''
     StepFields = Form.of(
-        Boolean.named('acquire').using(default=False, optional=True),
+        Boolean.named('magnet_engaged').using(default=False, optional=True),
+        Boolean.named('dstat_enabled').using(default=False, optional=True),
     )
 
     def __init__(self):
         self.name = self.plugin_name
         self.timeout_id = None
-        self.remote = None
+        self.dstat_remote = None
+        self.dropbot_dx_remote = None
+
+    def connected(self):
+        return (self.dropbot_dx_remote is not None)
+
+    def on_plugin_enable(self):
+        try:
+            self.dropbot_dx_remote = connect()
+        except IOError:
+            logger.warning('Could not connect to Dropbot DX.')
+
+    @is_connected
+    def on_plugin_disable(self):
+        self.dropbot_dx_remote.terminate()
+        self.dropbot_dx_remote._serial.close()
+
+    @is_connected
+    def on_protocol_run(self):
+        pass
 
     def on_step_run(self):
         """
@@ -100,40 +134,56 @@ class AnalystRemotePlugin(Plugin, AppDataController, StepOptionsController):
             or 'Fail' - unrecoverable error (stop the protocol)
         """
         app = get_app()
-        logger.info('[AnalystRemotePlugin] on_step_run(): step #%d',
+        logger.info('[DropbotDxPlugin] on_step_run(): step #%d',
                     app.protocol.current_step_number)
         # If `acquire` is `True`, start acquisition
         options = self.get_step_options()
-        if options['acquire']:
-            app_values = self.get_app_values()
-            try:
-                if self.timeout_id is not None:
-                    # Timer was already set, so cancel previous timer.
-                    gobject.source_remove(self.timeout_id)
-                self.remote = AnalystRemoteControl(app_values['subscribe_uri'],
-                                                   app_values['request_uri'])
-                self.remote.start_acquisition()
-                self.timeout_id = gobject.timeout_add(100,
-                                                      self.remote_check_tick)
-            except:
-                print "Exception in user code:"
-                print '-'*60
-                traceback.print_exc(file=sys.stdout)
-                print '-'*60
-                # An error occurred while initializing Analyst remote control.
+        if self.connected():
+            if not (self.dropbot_dx_remote
+                    .update_state(light_enabled=not options['dstat_enabled'],
+                                  magnet_engaged=options['magnet_engaged'])):
+                logger.error('Could not set state of Dropbot DX board.')
                 emit_signal('on_step_complete', [self.name, 'Fail'])
+            if options['dstat_enabled']:
+                app_values = self.get_app_values()
+                try:
+                    if self.timeout_id is not None:
+                        # Timer was already set, so cancel previous timer.
+                        gobject.source_remove(self.timeout_id)
+                    self.dstat_remote = DstatRemote(app_values['dstat_uri'])
+                    self.dstat_remote.start_acquisition()
+                    # Check every 100ms to see if remote command has completed.
+                    self.timeout_id = gobject.timeout_add(100,
+                                                          self
+                                                          .remote_check_tick)
+                except:
+                    print "Exception in user code:"
+                    print '-'*60
+                    traceback.print_exc(file=sys.stdout)
+                    print '-'*60
+                    # An error occurred while initializing Analyst remote
+                    # control.
+                    emit_signal('on_step_complete', [self.name, 'Fail'])
         else:
             emit_signal('on_step_complete', [self.name, None])
 
     def remote_check_tick(self):
-        if self.remote is not None:
+        '''
+         1. Check if there is a D-Stat acquisition has been started.
+         2. If (1), check to see if acquisition is finished.
+         3. If (2), emit `on_step_complete` signal.
+        '''
+        if self.dstat_remote is not None:
             try:
-                if self.remote.acquisition_complete():
+                if self.dstat_remote.acquisition_complete():
                     # Acquisition is complete so notify step complete.
-                    self.remote.reset()
+                    self.dstat_remote.reset()
+                    if not (self.dropbot_dx_remote
+                            .update_state(light_enabled=True)):
+                        raise IOError('Could not enable light.')
                     emit_signal('on_step_complete', [self.name, None])
                     self.timeout_id = None
-                    self.remote = None
+                    self.dstat_remote = None
                     return False
                 else:
                     print "Waiting for acquisition to complete..."
@@ -144,7 +194,7 @@ class AnalystRemotePlugin(Plugin, AppDataController, StepOptionsController):
                 print '-'*60
                 emit_signal('on_step_complete', [self.name, 'Fail'])
                 self.timeout_id = None
-                self.remote = None
+                self.dstat_remote = None
                 return False
         return True
 
