@@ -28,7 +28,7 @@ from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
                                       implements, emit_signal)
 from microdrop.app_context import get_app
-from dropbot_dx import connect
+import dropbot_dx as dx
 from dstat_remote import DstatRemote
 import gobject
 
@@ -105,7 +105,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
 
     def on_plugin_enable(self):
         try:
-            self.dropbot_dx_remote = connect()
+            self.dropbot_dx_remote = dx.SerialProxy()
         except IOError:
             logger.warning('Could not connect to Dropbot DX.')
 
