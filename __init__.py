@@ -18,7 +18,9 @@ along with dropbot_dx_plugin.  If not, see <http://www.gnu.org/licenses/>.
 """
 import sys, traceback
 from functools import wraps
+import subprocess
 
+import gtk
 from path_helpers import path
 from flatland import Integer, Boolean, Form, String
 from flatland.validation import ValueAtLeast, ValueAtMost
@@ -99,6 +101,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         self.timeout_id = None
         self.dstat_remote = None
         self.dropbot_dx_remote = None
+        self.initialized = False
 
     def connected(self):
         return (self.dropbot_dx_remote is not None)
@@ -108,11 +111,29 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             self.dropbot_dx_remote = dx.SerialProxy()
         except IOError:
             logger.warning('Could not connect to Dropbot DX.')
+            
+        if not self.initialized:
+            app = get_app()
+            self.tools_menu_item = gtk.MenuItem("DropBot DX")
+            app.main_window_controller.menu_tools.append(
+                self.tools_menu_item)
+            self.tools_menu = gtk.Menu()
+            self.tools_menu.show()
+            self.tools_menu_item.set_submenu(self.tools_menu)
+            menu_item = gtk.MenuItem("Launch Dstat Interface")
+            self.tools_menu.append(menu_item)
+            menu_item.connect("activate", self.on_launch_dstat_inteface)
+            menu_item.show()
+            self.initialized = True
+        self.tools_menu_item.show()
 
-    @is_connected
+    def on_launch_dstat_inteface(self, widget, data=None):
+        subprocess.Popen([sys.executable, '-m', 'dstat_interface'])
+
     def on_plugin_disable(self):
-        self.dropbot_dx_remote.terminate()
-        self.dropbot_dx_remote._serial.close()
+        if self.connected():
+            self.dropbot_dx_remote.terminate()
+        self.tools_menu_item.hide()
 
     @is_connected
     def on_protocol_run(self):
