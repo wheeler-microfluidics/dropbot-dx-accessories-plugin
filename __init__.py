@@ -19,12 +19,11 @@ along with dropbot_dx_plugin.  If not, see <http://www.gnu.org/licenses/>.
 import sys, traceback
 from functools import wraps
 import subprocess
+import logging
 
 import gtk
 from path_helpers import path
-from flatland import Integer, Boolean, Form, String
-from flatland.validation import ValueAtLeast, ValueAtMost
-from microdrop.logger import logger
+from flatland import Boolean, Form, String
 from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
                                       get_plugin_info)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
@@ -33,6 +32,8 @@ from microdrop.app_context import get_app
 import dropbot_dx as dx
 from dstat_remote import DstatRemote
 import gobject
+
+logger = logging.getLogger(__name__)
 
 
 PluginGlobals.push_env('microdrop.managed')
@@ -111,7 +112,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             self.dropbot_dx_remote = dx.SerialProxy()
         except IOError:
             logger.warning('Could not connect to Dropbot DX.')
-            
+
         if not self.initialized:
             app = get_app()
             self.tools_menu_item = gtk.MenuItem("DropBot DX")
