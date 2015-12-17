@@ -1,2 +1,2 @@
-dropbot-dx>=0.2.post15
+dropbot-dx==0.2.post16
 dstat-interface
