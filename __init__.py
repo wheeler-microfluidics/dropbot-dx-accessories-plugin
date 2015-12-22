@@ -32,6 +32,7 @@ from microdrop.app_context import get_app
 import dropbot_dx as dx
 from dstat_remote import DstatRemote
 import gobject
+from pandas_helpers import series_to_gtk_form
 
 logger = logging.getLogger(__name__)
 
@@ -121,12 +122,20 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             self.tools_menu = gtk.Menu()
             self.tools_menu.show()
             self.tools_menu_item.set_submenu(self.tools_menu)
-            menu_item = gtk.MenuItem("Launch Dstat Interface")
+            menu_item = gtk.MenuItem("Launch Dstat interface")
             self.tools_menu.append(menu_item)
             menu_item.connect("activate", self.on_launch_dstat_inteface)
             menu_item.show()
+            self.edit_config_menu_item = \
+                gtk.MenuItem("Edit configuration settings")
+            self.tools_menu.append(self.edit_config_menu_item)
+            self.edit_config_menu_item.connect("activate",
+                                               self.on_edit_configuration)
             self.initialized = True
+            
         self.tools_menu_item.show()
+        if self.connected():
+            self.edit_config_menu_item.show()
 
     def on_launch_dstat_inteface(self, widget, data=None):
         subprocess.Popen([sys.executable, '-m', 'dstat_interface'])
@@ -236,6 +245,17 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         """
         Handler called when the current step is swapped.
         """
+
+    def on_edit_configuration(self, widget=None, data=None):
+        '''
+        Display a dialog to manually edit the configuration settings.
+        '''
+        config = self.dropbot_dx_remote.config
+        valid, response = series_to_gtk_form(config,
+            title='Edit configuration settings'
+        )
+        if valid:
+            self.dropbot_dx_remote.update_config(**response)
 
 
 PluginGlobals.pop_env()

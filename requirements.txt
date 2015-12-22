@@ -1,2 +1,6 @@
-dropbot-dx==0.2.post16
+dropbot-dx==0.2.post19
 dstat-interface
+pandas_helpers
+flatland
+wheeler.pygtkhelpers
+
