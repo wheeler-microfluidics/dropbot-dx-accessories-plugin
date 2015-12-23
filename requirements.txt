@@ -1,4 +1,4 @@
-dropbot-dx==0.2.post19
+dropbot-dx==0.2.post24
 dstat-interface
 pandas_helpers
 flatland

@@ -33,6 +33,8 @@ import dropbot_dx as dx
 from dstat_remote import DstatRemote
 import gobject
 from pandas_helpers import series_to_gtk_form
+from pygtkhelpers.ui.extra_dialogs import yesno
+from arduino_helpers.upload import upload_firmware
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ def is_connected(_lambda):
         @wraps(f)
         def wrapped(self, *f_args, **f_kwargs):
             if not self.connected():
-                logger.warning('Dropbot DX not connected.')
+                logger.warning('DropBot DX not connected.')
             else:
                 f(self, *f_args, **f_kwargs)
         return wrapped
@@ -108,12 +110,40 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
     def connected(self):
         return (self.dropbot_dx_remote is not None)
 
-    def on_plugin_enable(self):
+    def connect(self):
         try:
             self.dropbot_dx_remote = dx.SerialProxy()
+            
+            host_version = self.dropbot_dx_remote.host_software_version
+            remote_version = self.dropbot_dx_remote.remote_software_version
+                        
+            if remote_version != host_version:
+                response = yesno('The DropBot DX firmware version (%s) '
+                                 'does not match the driver version (%s). '
+                                 'Update firmware?' % (remote_version,
+                                                       host_version))
+                if response == gtk.RESPONSE_YES:
+                    self.on_flash_firmware()
+                    
         except IOError:
-            logger.warning('Could not connect to Dropbot DX.')
+            logger.warning('Could not connect to DropBot DX.')
 
+    def on_flash_firmware(self):
+        board = dx.get_firmwares().keys()[0]
+        firmware_path = dx.get_firmwares()[board][0]
+        port = self.dropbot_dx_remote.stream.serial_device.port
+
+        # disconnect from DropBot DX so that we can flash it
+        del self.dropbot_dx_remote
+        self.dropbot_dx_remote = None
+
+        logger.info(upload_firmware(firmware_path, board, port=port))
+
+        # reconnect
+        self.connect()
+
+    def on_plugin_enable(self):
+        self.connect()
         if not self.initialized:
             app = get_app()
             self.tools_menu_item = gtk.MenuItem("DropBot DX")
@@ -173,7 +203,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             if not (self.dropbot_dx_remote
                     .update_state(light_enabled=not options['dstat_enabled'],
                                   magnet_engaged=options['magnet_engaged'])):
-                logger.error('Could not set state of Dropbot DX board.')
+                logger.error('Could not set state of DropBot DX board.')
                 emit_signal('on_step_complete', [self.name, 'Fail'])
             if options['dstat_enabled']:
                 app_values = self.get_app_values()
