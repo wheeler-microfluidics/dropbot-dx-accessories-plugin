@@ -32,8 +32,8 @@ from microdrop.app_context import get_app
 import dropbot_dx as dx
 from dstat_remote import DstatRemote
 import gobject
-from pandas_helpers import series_to_gtk_form
-from pygtkhelpers.ui.extra_dialogs import yesno
+from pygtkhelpers.ui.extra_dialogs import yesno, FormViewDialog
+from pygtkhelpers.utils import dict_to_form
 from arduino_helpers.upload import upload_firmware
 
 logger = logging.getLogger(__name__)
@@ -281,9 +281,9 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         Display a dialog to manually edit the configuration settings.
         '''
         config = self.dropbot_dx_remote.config
-        valid, response = series_to_gtk_form(config,
-            title='Edit configuration settings'
-        )
+        form = dict_to_form(config)
+        dialog = FormViewDialog('Edit configuration settings')
+        valid, response = dialog.run(form)
         if valid:
             self.dropbot_dx_remote.update_config(**response)
 
