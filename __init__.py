@@ -78,7 +78,8 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             config file, in a section named after this plugin's name attribute
     '''
     AppFields = Form.of(
-        String.named('dstat_uri').using(default='', optional=True),
+        String.named('dstat_uri').using(default='tcp://localhost:6789',
+                                        optional=True),
     )
 
     '''
@@ -167,8 +168,10 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         if self.connected():
             self.edit_config_menu_item.show()
 
+        super(DropbotDxPlugin, self).on_plugin_enable()
+
     def on_launch_dstat_inteface(self, widget, data=None):
-        subprocess.Popen([sys.executable, '-m', 'dstat_interface'])
+        subprocess.Popen([sys.executable, '-m', 'dstat_interface.main'])
 
     def on_plugin_disable(self):
         if self.connected():
