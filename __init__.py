@@ -125,7 +125,9 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                                                        host_version))
                 if response == gtk.RESPONSE_YES:
                     self.on_flash_firmware()
-                    
+            
+            # turn on the light by default
+            self.dropbot_dx_remote.update_state(light_enabled=True)
         except IOError:
             logger.warning('Could not connect to DropBot DX.')
 
