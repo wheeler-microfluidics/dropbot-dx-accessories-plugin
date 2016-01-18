@@ -1,4 +1,3 @@
 dropbot-dx>=0.3.post4
 dstat-interface>=1.0.1
-flatland
 wheeler.pygtkhelpers>=0.11.post6
