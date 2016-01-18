@@ -230,7 +230,16 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                     # An error occurred while initializing Analyst remote
                     # control.
                     emit_signal('on_step_complete', [self.name, 'Fail'])
+            else:
+                # D-State is not enabled, so step is complete.
+                emit_signal('on_step_complete', [self.name, None])
         else:
+            # DropBox-DX device is not connected, but allow protocol to
+            # continue.
+            #
+            # N.B., A warning message is display once at the *start* of the
+            # protocol if no DropBot-DX connection has been established, but
+            # *not* on each step.
             emit_signal('on_step_complete', [self.name, None])
 
     def remote_check_tick(self):
