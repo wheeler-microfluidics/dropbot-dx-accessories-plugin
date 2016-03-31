@@ -24,13 +24,12 @@ import logging
 import gtk
 from path_helpers import path
 from flatland import Boolean, Form, String
-from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
-                                      get_plugin_info)
+from microdrop.plugin_helpers import (StepOptionsController, get_plugin_info,
+                                      hub_execute)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
                                       implements, emit_signal)
 from microdrop.app_context import get_app
 import dropbot_dx as dx
-from dstat_remote import DstatRemote
 import gobject
 from pygtkhelpers.ui.extra_dialogs import yesno, FormViewDialog
 from pygtkhelpers.utils import dict_to_form
@@ -54,33 +53,13 @@ def is_connected(_lambda):
     return wrapper(_lambda)
 
 
-class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
+class DropbotDxPlugin(Plugin, StepOptionsController):
     """
     This class is automatically registered with the PluginManager.
     """
     implements(IPlugin)
     version = get_plugin_info(path(__file__).parent).version
     plugin_name = get_plugin_info(path(__file__).parent).plugin_name
-
-    '''
-    AppFields
-    ---------
-
-    A flatland Form specifying application options for the current plugin.
-    Note that nested Form objects are not supported.
-
-    Since we subclassed AppDataController, an API is available to access and
-    modify these attributes.  This API also provides some nice features
-    automatically:
-        -all fields listed here will be included in the app options dialog
-            (unless properties=dict(show_in_gui=False) is used)
-        -the values of these fields will be stored persistently in the microdrop
-            config file, in a section named after this plugin's name attribute
-    '''
-    AppFields = Form.of(
-        String.named('dstat_uri').using(default='tcp://localhost:6789',
-                                        optional=True),
-    )
 
     '''
     StepFields
@@ -104,7 +83,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
     def __init__(self):
         self.name = self.plugin_name
         self.timeout_id = None
-        self.dstat_remote = None
+        self.dstat_experiment_id = None
         self.dropbot_dx_remote = None
         self.initialized = False
 
@@ -114,10 +93,10 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
     def connect(self):
         try:
             self.dropbot_dx_remote = dx.SerialProxy()
-            
+
             host_version = self.dropbot_dx_remote.host_software_version
             remote_version = self.dropbot_dx_remote.remote_software_version
-                        
+
             if remote_version != host_version:
                 response = yesno('The DropBot DX firmware version (%s) '
                                  'does not match the driver version (%s). '
@@ -125,7 +104,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                                                        host_version))
                 if response == gtk.RESPONSE_YES:
                     self.on_flash_firmware()
-            
+
             # turn on the light by default
             self.dropbot_dx_remote.update_state(light_enabled=True)
         except IOError:
@@ -165,12 +144,10 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             self.edit_config_menu_item.connect("activate",
                                                self.on_edit_configuration)
             self.initialized = True
-            
+
         self.tools_menu_item.show()
         if self.connected():
             self.edit_config_menu_item.show()
-
-        super(DropbotDxPlugin, self).on_plugin_enable()
 
     def on_launch_dstat_inteface(self, widget, data=None):
         subprocess.Popen([sys.executable, '-m', 'dstat_interface.main'])
@@ -216,8 +193,8 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                     if self.timeout_id is not None:
                         # Timer was already set, so cancel previous timer.
                         gobject.source_remove(self.timeout_id)
-                    self.dstat_remote = DstatRemote(app_values['dstat_uri'])
-                    self.dstat_remote.start_acquisition()
+                    self.dstat_experiment_id = \
+                        hub_execute('dstat-interface', 'run_active_experiment')
                     # Check every 100ms to see if remote command has completed.
                     self.timeout_id = gobject.timeout_add(100,
                                                           self
@@ -248,29 +225,29 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
          2. If (1), check to see if acquisition is finished.
          3. If (2), emit `on_step_complete` signal.
         '''
-        if self.dstat_remote is not None:
-            try:
-                if self.dstat_remote.acquisition_complete():
-                    # Acquisition is complete so notify step complete.
-                    self.dstat_remote.reset()
-                    if not (self.dropbot_dx_remote
-                            .update_state(light_enabled=True)):
-                        raise IOError('Could not enable light.')
-                    emit_signal('on_step_complete', [self.name, None])
-                    self.timeout_id = None
-                    self.dstat_remote = None
-                    return False
-                else:
-                    print "Waiting for acquisition to complete..."
-            except:
-                print "Exception in user code:"
-                print '-'*60
-                traceback.print_exc(file=sys.stdout)
-                print '-'*60
-                emit_signal('on_step_complete', [self.name, 'Fail'])
+        try:
+            completed_timestamp = hub_execute('dstat-interface',
+                                              'acquisition_complete',
+                                              experiment_id=
+                                              self.dstat_experiment_id)
+            if completed_timestamp is not None:
+                # Acquisition is complete so notify step complete.
+                if not (self.dropbot_dx_remote
+                        .update_state(light_enabled=True)):
+                    raise IOError('Could not enable light.')
+                emit_signal('on_step_complete', [self.name, None])
                 self.timeout_id = None
-                self.dstat_remote = None
                 return False
+            else:
+                print "Waiting for acquisition to complete..."
+        except:
+            print "Exception in user code:"
+            print '-'*60
+            traceback.print_exc(file=sys.stdout)
+            print '-'*60
+            emit_signal('on_step_complete', [self.name, 'Fail'])
+            self.timeout_id = None
+            return False
         return True
 
     def on_step_options_swapped(self, plugin, old_step_number, step_number):
