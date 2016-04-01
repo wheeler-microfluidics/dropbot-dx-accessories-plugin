@@ -23,7 +23,8 @@ import logging
 
 import gtk
 from path_helpers import path
-from flatland import Boolean, Form, String
+from flatland import Boolean, Form
+from pygtkhelpers.ui.extra_widgets import Filepath
 from microdrop.plugin_helpers import (StepOptionsController, get_plugin_info,
                                       hub_execute)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
@@ -42,6 +43,11 @@ PluginGlobals.push_env('microdrop.managed')
 
 
 def is_connected(_lambda):
+    '''
+    Decorator to check if Dropbot DX instrument is connected.
+
+    If not connected, warning is logged, but wrapped function is not called.
+    '''
     def wrapper(f):
         @wraps(f)
         def wrapped(self, *f_args, **f_kwargs):
@@ -61,36 +67,35 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
     version = get_plugin_info(path(__file__).parent).version
     plugin_name = get_plugin_info(path(__file__).parent).plugin_name
 
-    '''
-    StepFields
-    ---------
+    # `StepFields`
+    # ------------
 
-    A flatland Form specifying the per step options for the current plugin.
-    Note that nested Form objects are not supported.
+    # A `flatland` `Form` specifying the per step options for the current
+    # plugin. Note that nested `Form` objects are not supported.
 
-    Since we subclassed StepOptionsController, an API is available to access and
-    modify these attributes.  This API also provides some nice features
-    automatically:
-        -all fields listed here will be included in the protocol grid view
-            (unless properties=dict(show_in_gui=False) is used)
-        -the values of these fields will be stored persistently for each step
-    '''
-    StepFields = Form.of(
-        Boolean.named('magnet_engaged').using(default=False, optional=True),
-        Boolean.named('dstat_enabled').using(default=False, optional=True),
-    )
+    # Since we subclassed `StepOptionsController`, an API is available to
+    # access and modify these attributes.  This API also provides some nice
+    # features automatically:
+
+    #  - All fields listed here will be included in the protocol grid view
+    #    (unless `properties=dict(show_in_gui=False`) is used).
+    #  - The values of these fields will be stored persistently for each step.
+    StepFields = Form.of(Boolean.named('magnet_engaged').using(default=False,
+                                                               optional=True),
+                         Boolean.named('dstat_enabled').using(default=False,
+                                                              optional=True))
 
     def __init__(self):
         self.name = self.plugin_name
-        self.timeout_id = None
-        self.dstat_experiment_id = None
-        self.dropbot_dx_remote = None
-        self.initialized = False
-
-    def connected(self):
-        return (self.dropbot_dx_remote is not None)
+        self.dstat_timeout_id = None  # Periodic Dstat status check timeout id
+        self.dstat_experiment_id = None  # UUID of active Dstat experiment
+        self.dropbot_dx_remote = None  # `dropbot_dx.SerialProxy` instance
+        self.initialized = False  # Latch to, e.g., config menus, only once
 
     def connect(self):
+        '''
+        Connect to dropbot-dx instrument.
+        '''
         try:
             self.dropbot_dx_remote = dx.SerialProxy()
 
@@ -110,6 +115,28 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         except IOError:
             logger.warning('Could not connect to DropBot DX.')
 
+    def connected(self):
+        '''
+        Returns
+        -------
+
+            (bool) : `True` if dropbot-dx instrument is connected.
+        '''
+        return (self.dropbot_dx_remote is not None)
+
+    ###########################################################################
+    # # Menu callbacks #
+    def on_edit_configuration(self, widget=None, data=None):
+        '''
+        Display a dialog to manually edit the configuration settings.
+        '''
+        config = self.dropbot_dx_remote.config
+        form = dict_to_form(config)
+        dialog = FormViewDialog('Edit configuration settings')
+        valid, response = dialog.run(form)
+        if valid:
+            self.dropbot_dx_remote.update_config(**response)
+
     def on_flash_firmware(self):
         board = dx.get_firmwares().keys()[0]
         firmware_path = dx.get_firmwares()[board][0]
@@ -124,6 +151,26 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         # reconnect
         self.connect()
 
+    def on_launch_dstat_interface(self, widget, data=None):
+        subprocess.Popen([sys.executable, '-m', 'dstat_interface.main'])
+
+    def on_set_dstat_params_file(self, widget, data=None):
+        options = self.get_step_options()
+        form = Form.of(Filepath.named('dstat_params_file')
+                       .using(default=options.get('dstat_params_file', ''),
+                              optional=True,
+                              properties={'patterns':
+                                          [('Dstat parameters file (*.yml)',
+                                            ('*.yml', ))]}))
+        dialog = FormViewDialog()
+        valid, response = dialog.run(form)
+
+        if valid:
+            options['dstat_params_file'] = response['dstat_params_file']
+            self.set_step_values(options)
+
+    ###########################################################################
+    # # Plugin signal handlers #
     def on_plugin_enable(self):
         self.connect()
         if not self.initialized:
@@ -136,10 +183,14 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
             self.tools_menu_item.set_submenu(self.tools_menu)
             menu_item = gtk.MenuItem("Launch Dstat interface")
             self.tools_menu.append(menu_item)
-            menu_item.connect("activate", self.on_launch_dstat_inteface)
+            menu_item.connect("activate", self.on_launch_dstat_interface)
+            menu_item.show()
+            menu_item = gtk.MenuItem("Set step Dstat parameters file...")
+            self.tools_menu.append(menu_item)
+            menu_item.connect("activate", self.on_set_dstat_params_file)
             menu_item.show()
             self.edit_config_menu_item = \
-                gtk.MenuItem("Edit configuration settings")
+                gtk.MenuItem("Edit configuration settings...")
             self.tools_menu.append(self.edit_config_menu_item)
             self.edit_config_menu_item.connect("activate",
                                                self.on_edit_configuration)
@@ -148,9 +199,6 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         self.tools_menu_item.show()
         if self.connected():
             self.edit_config_menu_item.show()
-
-    def on_launch_dstat_inteface(self, widget, data=None):
-        subprocess.Popen([sys.executable, '-m', 'dstat_interface.main'])
 
     def on_plugin_disable(self):
         if self.connected():
@@ -161,21 +209,38 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
     def on_protocol_run(self):
         pass
 
+    def on_step_options_swapped(self, plugin, old_step_number, step_number):
+        """
+        Handler called when the step options are changed for a particular
+        plugin.  This will, for example, allow for GUI elements to be
+        updated based on step specified.
+
+        Parameters:
+            plugin : plugin instance for which the step options changed
+            step_number : step number that the options changed for
+        """
+        pass
+
     def on_step_run(self):
-        """
-        Handler called whenever a step is executed. Note that this signal
-        is only emitted in realtime mode or if a protocol is running.
+        '''
+        Handler called whenever a step is executed. Note that this signal is
+        only emitted in realtime mode or if a protocol is running.
 
-        Plugins that handle this signal must emit the on_step_complete
-        signal once they have completed the step. The protocol controller
-        will wait until all plugins have completed the current step before
-        proceeding.
+        Plugins that handle this signal must emit the `on_step_complete` signal
+        once they have completed the step. The protocol controller will wait
+        until all plugins have completed the current step before proceeding.
 
-        return_value can be one of:
-            None
-            'Repeat' - repeat the step
-            or 'Fail' - unrecoverable error (stop the protocol)
-        """
+        The `on_step_complete` signal is emitted with following signature:
+
+            emit_signal('on_step_complete', [plugin_name, return_value])
+
+        where `plugin_name` is the name of the emitting plugin, and
+        `return_value` can be one of:
+
+         - `None`: Step completed successfully.
+         - `'Repeat'`: Repeat the step.
+         - `'Fail'`: Unrecoverable error (stop the protocol).
+        '''
         app = get_app()
         logger.info('[DropbotDxPlugin] on_step_run(): step #%d',
                     app.protocol.current_step_number)
@@ -188,17 +253,21 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                 logger.error('Could not set state of DropBot DX board.')
                 emit_signal('on_step_complete', [self.name, 'Fail'])
             if options['dstat_enabled']:
-                app_values = self.get_app_values()
                 try:
-                    if self.timeout_id is not None:
+                    if 'dstat_params_file' in options:
+                        # Load Dstat parameters.
+                        hub_execute('dstat-interface', 'load_params',
+                                    params_path=options['dstat_params_file'])
+
+                    if self.dstat_timeout_id is not None:
                         # Timer was already set, so cancel previous timer.
-                        gobject.source_remove(self.timeout_id)
+                        gobject.source_remove(self.dstat_timeout_id)
                     self.dstat_experiment_id = \
                         hub_execute('dstat-interface', 'run_active_experiment')
-                    # Check every 100ms to see if remote command has completed.
-                    self.timeout_id = gobject.timeout_add(100,
-                                                          self
-                                                          .remote_check_tick)
+                    # Check every 100ms to see if dstat acquisition has
+                    # completed.
+                    self.dstat_timeout_id = gobject.timeout_add(100, self
+                                                          .check_dstat_status)
                 except:
                     print "Exception in user code:"
                     print '-'*60
@@ -219,11 +288,12 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
             # *not* on each step.
             emit_signal('on_step_complete', [self.name, None])
 
-    def remote_check_tick(self):
+    ###########################################################################
+    # # Periodic callbacks #
+    def check_dstat_status(self):
         '''
-         1. Check if there is a D-Stat acquisition has been started.
-         2. If (1), check to see if acquisition is finished.
-         3. If (2), emit `on_step_complete` signal.
+         1. Check to see if acquisition is finished.
+         2. If (1), emit `on_step_complete` signal.
         '''
         try:
             completed_timestamp = hub_execute('dstat-interface',
@@ -236,7 +306,7 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                         .update_state(light_enabled=True)):
                     raise IOError('Could not enable light.')
                 emit_signal('on_step_complete', [self.name, None])
-                self.timeout_id = None
+                self.dstat_timeout_id = None
                 return False
             else:
                 print "Waiting for acquisition to complete..."
@@ -246,37 +316,9 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
             traceback.print_exc(file=sys.stdout)
             print '-'*60
             emit_signal('on_step_complete', [self.name, 'Fail'])
-            self.timeout_id = None
+            self.dstat_timeout_id = None
             return False
         return True
-
-    def on_step_options_swapped(self, plugin, old_step_number, step_number):
-        """
-        Handler called when the step options are changed for a particular
-        plugin.  This will, for example, allow for GUI elements to be
-        updated based on step specified.
-
-        Parameters:
-            plugin : plugin instance for which the step options changed
-            step_number : step number that the options changed for
-        """
-        pass
-
-    def on_step_swapped(self, old_step_number, step_number):
-        """
-        Handler called when the current step is swapped.
-        """
-
-    def on_edit_configuration(self, widget=None, data=None):
-        '''
-        Display a dialog to manually edit the configuration settings.
-        '''
-        config = self.dropbot_dx_remote.config
-        form = dict_to_form(config)
-        dialog = FormViewDialog('Edit configuration settings')
-        valid, response = dialog.run(form)
-        if valid:
-            self.dropbot_dx_remote.update_config(**response)
 
 
 PluginGlobals.pop_env()
