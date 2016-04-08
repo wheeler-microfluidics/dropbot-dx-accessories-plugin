@@ -16,10 +16,12 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with dropbot_dx_plugin.  If not, see <http://www.gnu.org/licenses/>.
 """
-import sys, traceback
 from functools import wraps
-import subprocess
+import itertools
 import logging
+import re
+import subprocess
+import sys, traceback
 
 import gtk
 from path_helpers import path
@@ -28,7 +30,8 @@ from pygtkhelpers.ui.extra_widgets import Filepath
 from microdrop.plugin_helpers import (StepOptionsController, get_plugin_info,
                                       hub_execute)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
-                                      implements, emit_signal)
+                                      implements, emit_signal,
+                                      get_service_instance_by_name)
 from microdrop.app_context import get_app
 import dropbot_dx as dx
 import gobject
@@ -57,6 +60,39 @@ def is_connected(_lambda):
                 f(self, *f_args, **f_kwargs)
         return wrapped
     return wrapper(_lambda)
+
+
+def get_unique_path(filepath):
+    '''
+    Append `-###` to the base name of a file until a file path is found that
+    does not exist.
+
+    Args
+    ----
+
+        filepath (str) : Full file path to target file.
+
+    Returns
+    -------
+
+        (path) : Full path where no file exists.
+    '''
+    filepath = path(filepath)
+    cre_incremental = re.compile(r'^(?P<namebase>.*)-(?P<index>\d+)$')
+    while filepath.isfile():
+        # Output path exists.
+        parent_i = filepath.parent
+        namebase_i = filepath.namebase
+        ext_i = filepath.ext
+        match = cre_incremental.search(namebase_i)
+        if match:
+            # File name ends with `-##`.  Increment and retry.
+            index_i = int(match.group('index')) + 1
+            namebase_i = match.group('namebase')
+        else:
+            index_i = 0
+        filepath = parent_i.joinpath(namebase_i + '-%02d%s' % (index_i, ext_i))
+    return filepath
 
 
 class DropbotDxPlugin(Plugin, StepOptionsController):
@@ -132,8 +168,8 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         '''
         config = self.dropbot_dx_remote.config
         form = dict_to_form(config)
-        dialog = FormViewDialog('Edit configuration settings')
-        valid, response = dialog.run(form)
+        dialog = FormViewDialog(form, 'Edit configuration settings')
+        valid, response = dialog.run()
         if valid:
             self.dropbot_dx_remote.update_config(**response)
 
@@ -162,8 +198,8 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                               properties={'patterns':
                                           [('Dstat parameters file (*.yml)',
                                             ('*.yml', ))]}))
-        dialog = FormViewDialog()
-        valid, response = dialog.run(form)
+        dialog = FormViewDialog(form)
+        valid, response = dialog.run()
 
         if valid:
             options['dstat_params_file'] = response['dstat_params_file']
@@ -264,6 +300,8 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                         gobject.source_remove(self.dstat_timeout_id)
                     self.dstat_experiment_id = \
                         hub_execute('dstat-interface', 'run_active_experiment')
+                    self._dstat_spinner = itertools.cycle(r'-\|/')
+                    print ''
                     # Check every 100ms to see if dstat acquisition has
                     # completed.
                     self.dstat_timeout_id = gobject.timeout_add(100, self
@@ -301,15 +339,51 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                                               experiment_id=
                                               self.dstat_experiment_id)
             if completed_timestamp is not None:
-                # Acquisition is complete so notify step complete.
+                # ## Acquisition is complete ##
+
+                # ### Save results data and plot ###
+                app = get_app()
+                output_directory = (path(app.experiment_log.get_log_path())
+                                    .abspath())
+                output_namebase = str(app.protocol.current_step_number)
+
+                try:
+                    step_label_plugin =\
+                        get_service_instance_by_name('wheelerlab'
+                                                     '.step_label_plugin')
+                    label = step_label_plugin.get_step_options().get('label')
+                    if label:
+                        output_namebase = label
+                except:
+                    pass
+
+                # Save results to a text file in the experiment log directory.
+                output_txt_path = get_unique_path(output_directory
+                                                  .joinpath(output_namebase +
+                                                            '.txt'))
+                logger.info('Save results to: %s', output_txt_path)
+                hub_execute('dstat-interface', 'save_text',
+                            save_data_path=output_txt_path)
+
+                # Save results plot to a PDF in the experiment log directory.
+                output_pdf_path = get_unique_path(output_directory
+                                                  .joinpath(output_namebase +
+                                                            '.pdf'))
+                logger.info('Save plot to: %s', output_pdf_path)
+                hub_execute('dstat-interface', 'save_plot',
+                            save_plot_path=output_pdf_path)
+
+                # Turn light back on after photomultiplier tube (PMT)
+                # measurement.
                 if not (self.dropbot_dx_remote
                         .update_state(light_enabled=True)):
                     raise IOError('Could not enable light.')
+                # notify step complete.
                 emit_signal('on_step_complete', [self.name, None])
                 self.dstat_timeout_id = None
                 return False
             else:
-                print "Waiting for acquisition to complete..."
+                print '\rWaiting for Dstat...', self._dstat_spinner.next(),
         except:
             print "Exception in user code:"
             print '-'*60
