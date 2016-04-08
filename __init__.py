@@ -168,8 +168,8 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         '''
         config = self.dropbot_dx_remote.config
         form = dict_to_form(config)
-        dialog = FormViewDialog(form, 'Edit configuration settings')
-        valid, response = dialog.run()
+        dialog = FormViewDialog('Edit configuration settings')
+        valid, response = dialog.run(form)
         if valid:
             self.dropbot_dx_remote.update_config(**response)
 
@@ -198,8 +198,8 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                               properties={'patterns':
                                           [('Dstat parameters file (*.yml)',
                                             ('*.yml', ))]}))
-        dialog = FormViewDialog(form)
-        valid, response = dialog.run()
+        dialog = FormViewDialog()
+        valid, response = dialog.run(form)
 
         if valid:
             options['dstat_params_file'] = response['dstat_params_file']
