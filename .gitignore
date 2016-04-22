@@ -4,3 +4,4 @@
 .sconsign.dblite
 *.pyc
 properties.yml
+.idea

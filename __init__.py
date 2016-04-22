@@ -25,13 +25,14 @@ import sys, traceback
 
 import gtk
 from path_helpers import path
-from flatland import Boolean, Form
+from flatland import Boolean, Form, String, Float
+from flatland.validation import ValueAtLeast, ValueAtMost, Validator
 from pygtkhelpers.ui.extra_widgets import Filepath
-from microdrop.plugin_helpers import (StepOptionsController, get_plugin_info,
-                                      hub_execute)
+from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
+                                      get_plugin_info, hub_execute)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
                                       implements, emit_signal,
-                                      get_service_instance_by_name)
+                                      ScheduleRequest, get_service_instance_by_name)
 from microdrop.app_context import get_app
 import dropbot_dx as dx
 import gobject
@@ -47,7 +48,7 @@ PluginGlobals.push_env('microdrop.managed')
 
 def is_connected(_lambda):
     '''
-    Decorator to check if Dropbot DX instrument is connected.
+    Decorator to check if DropBot DX instrument is connected.
 
     If not connected, warning is logged, but wrapped function is not called.
     '''
@@ -95,13 +96,34 @@ def get_unique_path(filepath):
     return filepath
 
 
-class DropbotDxPlugin(Plugin, StepOptionsController):
+class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsController):
     """
     This class is automatically registered with the PluginManager.
     """
     implements(IPlugin)
     version = get_plugin_info(path(__file__).parent).version
     plugin_name = get_plugin_info(path(__file__).parent).plugin_name
+
+    '''
+    AppFields
+    ---------
+
+    A flatland Form specifying application options for the current plugin.
+    Note that nested Form objects are not supported.
+
+    Since we subclassed AppDataController, an API is available to access and
+    modify these attributes.  This API also provides some nice features
+    automatically:
+        -all fields listed here will be included in the app options dialog
+            (unless properties=dict(show_in_gui=False) is used)
+        -the values of these fields will be stored persistently in the microdrop
+            config file, in a section named after this plugin's name attribute
+    '''
+    AppFields = Form.of(
+        Float.named('light_intensity').using(default=0.01, optional=True,
+                                     validators=[ValueAtLeast(minimum=0),
+                                                 ValueAtMost(maximum=1)]),
+    )
 
     # `StepFields`
     # ------------
@@ -132,9 +154,20 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         '''
         Connect to dropbot-dx instrument.
         '''
+        # if the dropbot dx plugin is installed and enabled, try getting its
+        # reference
+        try:
+            service = get_service_instance_by_name('wheelerlab.dropbot_dx')
+            if service.enabled():
+                self.dropbot_dx_remote = service.control_board
+                return
+        except:
+            pass
+
+        # if we couldn't get a reference, try finding a DropBot DX connected to
+        # a serial port
         try:
             self.dropbot_dx_remote = dx.SerialProxy()
-
             host_version = self.dropbot_dx_remote.host_software_version
             remote_version = self.dropbot_dx_remote.remote_software_version
 
@@ -145,9 +178,9 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                                                        host_version))
                 if response == gtk.RESPONSE_YES:
                     self.on_flash_firmware()
-
+            
             # turn on the light by default
-            self.dropbot_dx_remote.update_state(light_enabled=True)
+            self.dropbot_dx_remote.light_enabled = True
         except IOError:
             logger.warning('Could not connect to DropBot DX.')
 
@@ -278,16 +311,13 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
          - `'Fail'`: Unrecoverable error (stop the protocol).
         '''
         app = get_app()
-        logger.info('[DropbotDxPlugin] on_step_run(): step #%d',
+        logger.info('[DropBotDxAccessoriesPlugin] on_step_run(): step #%d',
                     app.protocol.current_step_number)
         # If `acquire` is `True`, start acquisition
         options = self.get_step_options()
         if self.connected():
-            if not (self.dropbot_dx_remote
-                    .update_state(light_enabled=not options['dstat_enabled'],
-                                  magnet_engaged=options['magnet_engaged'])):
-                logger.error('Could not set state of DropBot DX board.')
-                emit_signal('on_step_complete', [self.name, 'Fail'])
+            self.dropbot_dx_remote.light_enabled = not options['dstat_enabled']
+            self.dropbot_dx_remote.magnet_engaged=options['magnet_engaged']
             if options['dstat_enabled']:
                 try:
                     if 'dstat_params_file' in options:
@@ -375,9 +405,8 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
 
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
-                if not (self.dropbot_dx_remote
-                        .update_state(light_enabled=True)):
-                    raise IOError('Could not enable light.')
+                self.dropbot_dx_remote.light_enabled = True
+
                 # notify step complete.
                 emit_signal('on_step_complete', [self.name, None])
                 self.dstat_timeout_id = None
@@ -393,6 +422,17 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
             self.dstat_timeout_id = None
             return False
         return True
+
+    def get_schedule_requests(self, function_name):
+        """
+        Returns a list of scheduling requests (i.e., ScheduleRequest
+        instances) for the function specified by function_name.
+        """
+        if function_name in ['on_plugin_enable']:
+            return [ScheduleRequest('wheelerlab.dropbot_dx',
+                                    self.name),
+                    ]
+        return []
 
 
 PluginGlobals.pop_env()
