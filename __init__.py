@@ -28,7 +28,7 @@ from path_helpers import path
 from flatland import Boolean, Form, String, Float
 from flatland.validation import ValueAtLeast, ValueAtMost, Validator
 from pygtkhelpers.ui.extra_widgets import Filepath
-from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
+from microdrop.plugin_helpers import (StepOptionsController,
                                       get_plugin_info, hub_execute)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
                                       implements, emit_signal,
@@ -96,7 +96,7 @@ def get_unique_path(filepath):
     return filepath
 
 
-class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsController):
+class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
     """
     This class is automatically registered with the PluginManager.
     """
@@ -119,11 +119,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         -the values of these fields will be stored persistently in the microdrop
             config file, in a section named after this plugin's name attribute
     '''
-    AppFields = Form.of(
-        Float.named('light_intensity').using(default=0.01, optional=True,
-                                     validators=[ValueAtLeast(minimum=0),
-                                                 ValueAtMost(maximum=1)]),
-    )
 
     # `StepFields`
     # ------------
@@ -201,8 +196,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         '''
         config = self.dropbot_dx_remote.config
         form = dict_to_form(config)
-        dialog = FormViewDialog('Edit configuration settings')
-        valid, response = dialog.run(form)
+        dialog = FormViewDialog(form, 'Edit configuration settings')
+        valid, response = dialog.run()
         if valid:
             self.dropbot_dx_remote.update_config(**response)
 
