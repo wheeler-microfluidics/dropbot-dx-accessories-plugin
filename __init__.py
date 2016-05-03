@@ -119,6 +119,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         self.dstat_experiment_id = None  # UUID of active Dstat experiment
         self.dropbot_dx_remote = None  # `dropbot_dx.SerialProxy` instance
         self.initialized = False  # Latch to, e.g., config menus, only once
+        self._metadata = None
 
     def connect(self):
         '''
@@ -161,6 +162,23 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
                                     self.name)]
         return []
+
+    ###########################################################################
+    # # Accessor methods #
+    @property
+    def metadata(self):
+        '''
+        Add experiment index and experiment UUID to metadata.
+        '''
+        metadata = self._metadata.copy() if self._metadata else {}
+        app = get_app()
+        metadata['experiment_id'] = app.experiment_log.experiment_id
+        metadata['experiment_uuid'] = app.experiment_log.uuid
+        return metadata
+
+    @metadata.setter
+    def metadata(self, value):
+        self._metadata = value
 
     ###########################################################################
     # # Menu callbacks #
@@ -209,6 +227,18 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
 
     ###########################################################################
     # # Plugin signal handlers #
+    def on_metadata_changed(self, original_metadata, metadata):
+        '''
+        Notify DStat interface of updates to the experiment metadata.
+        '''
+        self.metadata = metadata
+        try:
+            hub_execute('dstat-interface', 'set_metadata', **self.metadata)
+        except:
+            logger.error('Error notifying DStat interface that metadata was '
+                         'updated.  Please check that the DStat interface '
+                         'software is running.')
+
     def on_plugin_enable(self):
         self.connect()
         if not self.initialized:
