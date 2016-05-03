@@ -22,15 +22,16 @@ import logging
 import re
 import subprocess
 import sys, traceback
+import time
 
 import gtk
 from path_helpers import path
-from flatland import Boolean, Form
+from flatland import Boolean, Float, Form
 from pygtkhelpers.ui.extra_widgets import Filepath
-from microdrop.plugin_helpers import (StepOptionsController, get_plugin_info,
-                                      hub_execute)
+from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
+                                      get_plugin_info, hub_execute)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
-                                      implements, emit_signal,
+                                      ScheduleRequest, implements, emit_signal,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 import dropbot_dx as dx
@@ -95,7 +96,7 @@ def get_unique_path(filepath):
     return filepath
 
 
-class DropbotDxPlugin(Plugin, StepOptionsController):
+class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
     """
     This class is automatically registered with the PluginManager.
     """
@@ -103,19 +104,10 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
     version = get_plugin_info(path(__file__).parent).version
     plugin_name = get_plugin_info(path(__file__).parent).plugin_name
 
-    # `StepFields`
-    # ------------
-
-    # A `flatland` `Form` specifying the per step options for the current
-    # plugin. Note that nested `Form` objects are not supported.
-
-    # Since we subclassed `StepOptionsController`, an API is available to
-    # access and modify these attributes.  This API also provides some nice
-    # features automatically:
-
-    #  - All fields listed here will be included in the protocol grid view
-    #    (unless `properties=dict(show_in_gui=False`) is used).
-    #  - The values of these fields will be stored persistently for each step.
+    AppFields = Form.of(Float.named('dstat_delay_s')
+                        .using(default=2., optional=True,
+                               properties={'title': 'Delay before D-stat '
+                                           'measurement (seconds)'}))
     StepFields = Form.of(Boolean.named('magnet_engaged').using(default=False,
                                                                optional=True),
                          Boolean.named('dstat_enabled').using(default=False,
@@ -159,6 +151,16 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
             (bool) : `True` if dropbot-dx instrument is connected.
         '''
         return (self.dropbot_dx_remote is not None)
+
+    def get_schedule_requests(self, function_name):
+        """
+        Returns a list of scheduling requests (i.e., ScheduleRequest
+        instances) for the function specified by function_name.
+        """
+        if function_name == 'on_step_run':
+            return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
+                                    self.name)]
+        return []
 
     ###########################################################################
     # # Menu callbacks #
@@ -235,6 +237,7 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         self.tools_menu_item.show()
         if self.connected():
             self.edit_config_menu_item.show()
+        super(DropbotDxPlugin, self).on_plugin_enable()
 
     def on_plugin_disable(self):
         if self.connected():
@@ -280,8 +283,8 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
         app = get_app()
         logger.info('[DropbotDxPlugin] on_step_run(): step #%d',
                     app.protocol.current_step_number)
-        # If `acquire` is `True`, start acquisition
         options = self.get_step_options()
+        app_values = self.get_app_values()
         if self.connected():
             if not (self.dropbot_dx_remote
                     .update_state(light_enabled=not options['dstat_enabled'],
@@ -289,15 +292,19 @@ class DropbotDxPlugin(Plugin, StepOptionsController):
                 logger.error('Could not set state of DropBot DX board.')
                 emit_signal('on_step_complete', [self.name, 'Fail'])
             if options['dstat_enabled']:
+                # D-stat is enabled for step.  Request acquisition.
                 try:
                     if 'dstat_params_file' in options:
                         # Load Dstat parameters.
                         hub_execute('dstat-interface', 'load_params',
                                     params_path=options['dstat_params_file'])
-
                     if self.dstat_timeout_id is not None:
                         # Timer was already set, so cancel previous timer.
                         gobject.source_remove(self.dstat_timeout_id)
+                    # Delay before D-stat measurement (e.g., to allow webcam
+                    # light to turn off).
+                    dstat_delay_s = app_values.get('dstat_delay_s', 0)
+                    time.sleep(max(0, dstat_delay_s))
                     self.dstat_experiment_id = \
                         hub_execute('dstat-interface', 'run_active_experiment')
                     self._dstat_spinner = itertools.cycle(r'-\|/')
