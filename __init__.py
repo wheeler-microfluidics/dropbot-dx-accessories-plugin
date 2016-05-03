@@ -344,8 +344,15 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                     # light to turn off).
                     dstat_delay_s = app_values.get('dstat_delay_s', 0)
                     time.sleep(max(0, dstat_delay_s))
+                    step_label = self.get_step_label()
+                    # Send Microdrop step label (if available) to provide name
+                    # for DStat experiment.
+                    metadata = self.metadata.copy()
+                    if step_label:
+                        metadata['name'] = step_label
                     self.dstat_experiment_id = \
-                        hub_execute('dstat-interface', 'run_active_experiment')
+                        hub_execute('dstat-interface', 'run_active_experiment',
+                                    metadata=metadata)
                     self._dstat_spinner = itertools.cycle(r'-\|/')
                     print ''
                     # Check every 100ms to see if dstat acquisition has
