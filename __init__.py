@@ -165,6 +165,15 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
 
     ###########################################################################
     # # Accessor methods #
+    def get_step_label(self):
+        try:
+            step_label_plugin =\
+                get_service_instance_by_name('wheelerlab'
+                                                '.step_label_plugin')
+            return step_label_plugin.get_step_options().get('label')
+        except:
+            return None
+
     @property
     def metadata(self):
         '''
@@ -384,15 +393,9 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                                     .abspath())
                 output_namebase = str(app.protocol.current_step_number)
 
-                try:
-                    step_label_plugin =\
-                        get_service_instance_by_name('wheelerlab'
-                                                     '.step_label_plugin')
-                    label = step_label_plugin.get_step_options().get('label')
-                    if label:
-                        output_namebase = label
-                except:
-                    pass
+                step_label = self.get_step_label()
+                if step_label is not None:
+                    output_namebase = step_label
 
                 # Save results to a text file in the experiment log directory.
                 output_txt_path = get_unique_path(output_directory
