@@ -144,6 +144,7 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         self.dstat_experiment_id = None  # UUID of active Dstat experiment
         self.dropbot_dx_remote = None  # `dropbot_dx.SerialProxy` instance
         self.initialized = False  # Latch to, e.g., config menus, only once
+        self.has_environment_data = False
 
     def connect(self):
         '''
@@ -155,29 +156,38 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
             service = get_service_instance_by_name('wheelerlab.dropbot_dx')
             if service.enabled():
                 self.dropbot_dx_remote = service.control_board
-                return
         except:
             pass
 
-        # if we couldn't get a reference, try finding a DropBot DX connected to
-        # a serial port
-        try:
-            self.dropbot_dx_remote = dx.SerialProxy()
-            host_version = self.dropbot_dx_remote.host_software_version
-            remote_version = self.dropbot_dx_remote.remote_software_version
+        if self.dropbot_dx_remote is None:
+            # if we couldn't get a reference, try finding a DropBot DX connected to
+            # a serial port
+            try:
+                self.dropbot_dx_remote = dx.SerialProxy()
+                host_version = self.dropbot_dx_remote.host_software_version
+                remote_version = self.dropbot_dx_remote.remote_software_version
 
-            if remote_version != host_version:
-                response = yesno('The DropBot DX firmware version (%s) '
-                                 'does not match the driver version (%s). '
-                                 'Update firmware?' % (remote_version,
-                                                       host_version))
-                if response == gtk.RESPONSE_YES:
-                    self.on_flash_firmware()
-            
-            # turn on the light by default
-            self.dropbot_dx_remote.light_enabled = True
-        except IOError:
-            logger.warning('Could not connect to DropBot DX.')
+                if remote_version != host_version:
+                    response = yesno('The DropBot DX firmware version (%s) '
+                                     'does not match the driver version (%s). '
+                                     'Update firmware?' % (remote_version,
+                                                           host_version))
+                    if response == gtk.RESPONSE_YES:
+                        self.on_flash_firmware()
+
+                # turn on the light by default
+                self.dropbot_dx_remote.light_enabled = True
+            except IOError:
+                logger.warning('Could not connect to DropBot DX.')
+
+        try:
+            env = self.dropbot_dx_remote.get_environment_state().to_dict()
+            logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
+                        (env['temperature_celsius'],
+                         100 * env['relative_humidity']))
+            self.has_environment_data = True
+        except:
+            self.has_environment_data = False
 
     def connected(self):
         '''
@@ -313,6 +323,17 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         if self.connected():
             self.dropbot_dx_remote.light_enabled = not options['dstat_enabled']
             self.dropbot_dx_remote.magnet_engaged=options['magnet_engaged']
+            try:
+                if self.has_environment_data:
+                    env = self.dropbot_dx_remote.get_environment_state().to_dict()
+                    logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
+                                (env['temperature_celsius'],
+                                 100 * env['relative_humidity']))
+                    app.experiment_log.add_data({"environment state": env},
+                                                self.name)
+            except ValueError:
+                self.has_environment_data = False
+
             if options['dstat_enabled']:
                 try:
                     if 'dstat_params_file' in options:
