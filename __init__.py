@@ -119,6 +119,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         self.dstat_experiment_id = None  # UUID of active Dstat experiment
         self.dropbot_dx_remote = None  # `dropbot_dx.SerialProxy` instance
         self.initialized = False  # Latch to, e.g., config menus, only once
+        self._metadata = None
 
     def connect(self):
         '''
@@ -161,6 +162,32 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
                                     self.name)]
         return []
+
+    ###########################################################################
+    # # Accessor methods #
+    def get_step_label(self):
+        try:
+            step_label_plugin =\
+                get_service_instance_by_name('wheelerlab'
+                                                '.step_label_plugin')
+            return step_label_plugin.get_step_options().get('label')
+        except:
+            return None
+
+    @property
+    def metadata(self):
+        '''
+        Add experiment index and experiment UUID to metadata.
+        '''
+        metadata = self._metadata.copy() if self._metadata else {}
+        app = get_app()
+        metadata['experiment_id'] = app.experiment_log.experiment_id
+        metadata['experiment_uuid'] = app.experiment_log.uuid
+        return metadata
+
+    @metadata.setter
+    def metadata(self, value):
+        self._metadata = value
 
     ###########################################################################
     # # Menu callbacks #
@@ -209,6 +236,18 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
 
     ###########################################################################
     # # Plugin signal handlers #
+    def on_metadata_changed(self, original_metadata, metadata):
+        '''
+        Notify DStat interface of updates to the experiment metadata.
+        '''
+        self.metadata = metadata
+        try:
+            hub_execute('dstat-interface', 'set_metadata', **self.metadata)
+        except:
+            logger.error('Error notifying DStat interface that metadata was '
+                         'updated.  Please check that the DStat interface '
+                         'software is running.')
+
     def on_plugin_enable(self):
         self.connect()
         if not self.initialized:
@@ -305,8 +344,15 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                     # light to turn off).
                     dstat_delay_s = app_values.get('dstat_delay_s', 0)
                     time.sleep(max(0, dstat_delay_s))
+                    step_label = self.get_step_label()
+                    # Send Microdrop step label (if available) to provide name
+                    # for DStat experiment.
+                    metadata = self.metadata.copy()
+                    if step_label:
+                        metadata['name'] = step_label
                     self.dstat_experiment_id = \
-                        hub_execute('dstat-interface', 'run_active_experiment')
+                        hub_execute('dstat-interface', 'run_active_experiment',
+                                    metadata=metadata)
                     self._dstat_spinner = itertools.cycle(r'-\|/')
                     print ''
                     # Check every 100ms to see if dstat acquisition has
@@ -354,15 +400,9 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                                     .abspath())
                 output_namebase = str(app.protocol.current_step_number)
 
-                try:
-                    step_label_plugin =\
-                        get_service_instance_by_name('wheelerlab'
-                                                     '.step_label_plugin')
-                    label = step_label_plugin.get_step_options().get('label')
-                    if label:
-                        output_namebase = label
-                except:
-                    pass
+                step_label = self.get_step_label()
+                if step_label is not None:
+                    output_namebase = step_label
 
                 # Save results to a text file in the experiment log directory.
                 output_txt_path = get_unique_path(output_directory
