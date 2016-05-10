@@ -1,4 +1,5 @@
-dropbot-dx>=0.3.post4
+dropbot-dx>=1.0
+dstat-interface>=1.2
 dstat-interface>=1.3
 wheeler.pygtkhelpers>=0.13.post8
 ZEO==4.1.0

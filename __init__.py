@@ -1,5 +1,5 @@
 """
-Copyright 2015 Christian Fobel
+Copyright 2015-2016 Christian Fobel and Ryan Fobel
 
 This file is part of dropbot_dx_plugin.
 
@@ -48,7 +48,7 @@ PluginGlobals.push_env('microdrop.managed')
 
 def is_connected(_lambda):
     '''
-    Decorator to check if Dropbot DX instrument is connected.
+    Decorator to check if DropBot DX instrument is connected.
 
     If not connected, warning is logged, but wrapped function is not called.
     '''
@@ -96,7 +96,7 @@ def get_unique_path(filepath):
     return filepath
 
 
-class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
+class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsController):
     """
     This class is automatically registered with the PluginManager.
     """
@@ -120,29 +120,50 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         self.dropbot_dx_remote = None  # `dropbot_dx.SerialProxy` instance
         self.initialized = False  # Latch to, e.g., config menus, only once
         self._metadata = None
+        self.has_environment_data = False
 
     def connect(self):
         '''
         Connect to dropbot-dx instrument.
         '''
+        # if the dropbot dx plugin is installed and enabled, try getting its
+        # reference
         try:
-            self.dropbot_dx_remote = dx.SerialProxy()
+            service = get_service_instance_by_name('wheelerlab.dropbot_dx')
+            if service.enabled():
+                self.dropbot_dx_remote = service.control_board
+        except:
+            pass
 
-            host_version = self.dropbot_dx_remote.host_software_version
-            remote_version = self.dropbot_dx_remote.remote_software_version
+        if self.dropbot_dx_remote is None:
+            # if we couldn't get a reference, try finding a DropBot DX connected to
+            # a serial port
+            try:
+                self.dropbot_dx_remote = dx.SerialProxy()
+                host_version = self.dropbot_dx_remote.host_software_version
+                remote_version = self.dropbot_dx_remote.remote_software_version
 
-            if remote_version != host_version:
-                response = yesno('The DropBot DX firmware version (%s) '
-                                 'does not match the driver version (%s). '
-                                 'Update firmware?' % (remote_version,
-                                                       host_version))
-                if response == gtk.RESPONSE_YES:
-                    self.on_flash_firmware()
+                if remote_version != host_version:
+                    response = yesno('The DropBot DX firmware version (%s) '
+                                     'does not match the driver version (%s). '
+                                     'Update firmware?' % (remote_version,
+                                                           host_version))
+                    if response == gtk.RESPONSE_YES:
+                        self.on_flash_firmware()
 
-            # turn on the light by default
-            self.dropbot_dx_remote.update_state(light_enabled=True)
-        except IOError:
-            logger.warning('Could not connect to DropBot DX.')
+                # turn on the light by default
+                self.dropbot_dx_remote.light_enabled = True
+            except IOError:
+                logger.warning('Could not connect to DropBot DX.')
+
+        try:
+            env = self.dropbot_dx_remote.get_environment_state().to_dict()
+            logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
+                        (env['temperature_celsius'],
+                         100 * env['relative_humidity']))
+            self.has_environment_data = True
+        except:
+            self.has_environment_data = False
 
     def connected(self):
         '''
@@ -264,7 +285,7 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
         self.tools_menu_item.show()
         if self.connected():
             self.edit_config_menu_item.show()
-        super(DropbotDxPlugin, self).on_plugin_enable()
+        super(DropBotDxAccessoriesPlugin, self).on_plugin_enable()
 
     def on_plugin_disable(self):
         if self.connected():
@@ -308,16 +329,24 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
          - `'Fail'`: Unrecoverable error (stop the protocol).
         '''
         app = get_app()
-        logger.info('[DropbotDxPlugin] on_step_run(): step #%d',
+        logger.info('[DropBotDxAccessoriesPlugin] on_step_run(): step #%d',
                     app.protocol.current_step_number)
         options = self.get_step_options()
         app_values = self.get_app_values()
         if self.connected():
-            if not (self.dropbot_dx_remote
-                    .update_state(light_enabled=not options['dstat_enabled'],
-                                  magnet_engaged=options['magnet_engaged'])):
-                logger.error('Could not set state of DropBot DX board.')
-                emit_signal('on_step_complete', [self.name, 'Fail'])
+            self.dropbot_dx_remote.light_enabled = not options['dstat_enabled']
+            self.dropbot_dx_remote.magnet_engaged=options['magnet_engaged']
+            try:
+                if self.has_environment_data:
+                    env = self.dropbot_dx_remote.get_environment_state().to_dict()
+                    logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
+                                (env['temperature_celsius'],
+                                 100 * env['relative_humidity']))
+                    app.experiment_log.add_data({"environment state": env},
+                                                self.name)
+            except ValueError:
+                self.has_environment_data = False
+
             if options['dstat_enabled']:
                 # D-stat is enabled for step.  Request acquisition.
                 try:
@@ -417,9 +446,8 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
 
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
-                if not (self.dropbot_dx_remote
-                        .update_state(light_enabled=True)):
-                    raise IOError('Could not enable light.')
+                self.dropbot_dx_remote.light_enabled = True
+
                 # notify step complete.
                 emit_signal('on_step_complete', [self.name, None])
                 self.dstat_timeout_id = None
@@ -435,6 +463,17 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
             self.dstat_timeout_id = None
             return False
         return True
+
+    def get_schedule_requests(self, function_name):
+        """
+        Returns a list of scheduling requests (i.e., ScheduleRequest
+        instances) for the function specified by function_name.
+        """
+        if function_name in ['on_plugin_enable']:
+            return [ScheduleRequest('wheelerlab.dropbot_dx',
+                                    self.name),
+                    ]
+        return []
 
 
 PluginGlobals.pop_env()
