@@ -372,8 +372,10 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                     # Send Microdrop step label (if available) to provide name
                     # for DStat experiment.
                     metadata = self.metadata.copy()
-                    if step_label:
-                        metadata['name'] = step_label
+                    metadata['name'] = (step_label if step_label else
+                                        str(app.protocol.current_step_number +
+                                            1))
+                    metadata['patient_id'] = metadata.get('sample_id', 'None')
 
                     # Get target path for DStat database directory.
                     dstat_database_path = (path(app.config['data_dir'])
