@@ -236,18 +236,6 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
 
     ###########################################################################
     # # Plugin signal handlers #
-    def on_metadata_changed(self, original_metadata, metadata):
-        '''
-        Notify DStat interface of updates to the experiment metadata.
-        '''
-        self.metadata = metadata
-        try:
-            hub_execute('dstat-interface', 'set_metadata', **self.metadata)
-        except:
-            logger.error('Error notifying DStat interface that metadata was '
-                         'updated.  Please check that the DStat interface '
-                         'software is running.')
-
     def on_plugin_enable(self):
         self.connect()
         if not self.initialized:
@@ -350,9 +338,16 @@ class DropbotDxPlugin(Plugin, AppDataController, StepOptionsController):
                     metadata = self.metadata.copy()
                     if step_label:
                         metadata['name'] = step_label
+
+                    # Get target path for DStat database directory.
+                    dstat_database_path = (path(app.config['data_dir'])
+                                           .realpath().joinpath('dstat-db'))
                     self.dstat_experiment_id = \
                         hub_execute('dstat-interface', 'run_active_experiment',
-                                    metadata=metadata)
+                                    metadata=metadata,
+                                    params={'db_path_entry':
+                                            str(dstat_database_path),
+                                            'db_enable_checkbutton': True})
                     self._dstat_spinner = itertools.cycle(r'-\|/')
                     print ''
                     # Check every 100ms to see if dstat acquisition has
