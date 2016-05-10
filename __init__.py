@@ -257,6 +257,12 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
 
     ###########################################################################
     # # Plugin signal handlers #
+    def on_metadata_changed(self, original_metadata, metadata):
+        '''
+        Notify DStat interface of updates to the experiment metadata.
+        '''
+        self.metadata = metadata
+
     def on_plugin_enable(self):
         self.connect()
         if not self.initialized:
