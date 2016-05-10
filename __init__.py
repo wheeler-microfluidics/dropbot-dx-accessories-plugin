@@ -179,7 +179,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         Returns a list of scheduling requests (i.e., ScheduleRequest
         instances) for the function specified by function_name.
         """
-        if function_name == 'on_step_run':
+        if function_name in ['on_plugin_enable']:
+            return [ScheduleRequest('wheelerlab.dropbot_dx', self.name)]
+        elif function_name == 'on_step_run':
             return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
                                     self.name)]
         return []
@@ -189,8 +191,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
     def get_step_label(self):
         try:
             step_label_plugin =\
-                get_service_instance_by_name('wheelerlab'
-                                                '.step_label_plugin')
+                get_service_instance_by_name('wheelerlab.step_label_plugin')
             return step_label_plugin.get_step_options().get('label')
         except:
             return None
@@ -469,17 +470,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             self.dstat_timeout_id = None
             return False
         return True
-
-    def get_schedule_requests(self, function_name):
-        """
-        Returns a list of scheduling requests (i.e., ScheduleRequest
-        instances) for the function specified by function_name.
-        """
-        if function_name in ['on_plugin_enable']:
-            return [ScheduleRequest('wheelerlab.dropbot_dx',
-                                    self.name),
-                    ]
-        return []
 
 
 PluginGlobals.pop_env()
