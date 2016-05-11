@@ -445,14 +445,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 hub_execute('dstat-interface', 'save_text',
                             save_data_path=output_txt_path)
 
-                # Save results plot to a PDF in the experiment log directory.
-                output_pdf_path = get_unique_path(output_directory
-                                                  .joinpath(output_namebase +
-                                                            '.pdf'))
-                logger.info('Save plot to: %s', output_pdf_path)
-                hub_execute('dstat-interface', 'save_plot',
-                            save_plot_path=output_pdf_path)
-
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
                 self.dropbot_dx_remote.light_enabled = True
