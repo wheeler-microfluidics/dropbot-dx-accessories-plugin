@@ -180,7 +180,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         instances) for the function specified by function_name.
         """
         if function_name in ['on_plugin_enable']:
-            return [ScheduleRequest('wheelerlab.dropbot_dx', self.name)]
+            return [ScheduleRequest('wheelerlab.dropbot_dx', self.name),
+                    ScheduleRequest('wheelerlab.dmf_control_board_plugin',
+                                    self.name)]
         elif function_name == 'on_step_run':
             return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
                                     self.name)]
