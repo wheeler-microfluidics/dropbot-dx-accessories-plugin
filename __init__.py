@@ -447,7 +447,8 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         if function_name in ['on_plugin_enable']:
             return [ScheduleRequest('wheelerlab.dropbot_dx',
                                     self.name),
-                    ]
+                    ScheduleRequest('wheelerlab.dmf_control_board',
+                                    self.name)]
         return []
 
 
