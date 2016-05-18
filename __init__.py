@@ -16,6 +16,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with dropbot_dx_plugin.  If not, see <http://www.gnu.org/licenses/>.
 """
+from datetime import timedelta
 from functools import wraps
 import itertools
 import logging
@@ -23,6 +24,7 @@ import re
 import subprocess
 import sys, traceback
 import time
+import types
 
 import gtk
 from path_helpers import path
@@ -456,6 +458,66 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 logger.info('Save results to: %s', output_txt_path)
                 hub_execute('dstat-interface', 'save_text',
                             save_data_path=output_txt_path)
+                data_i = hub_execute('dstat-interface', 'get_experiment_data',
+                                     experiment_id=self.dstat_experiment_id)
+                metadata_i = self.get_step_metadata()
+                # Compute (approximate) `utc_timestamp` for each DStat
+                # measurement.
+                max_time_s = data_i.time_s.max()
+                metadata_i['utc_timestamp'] = (completed_timestamp -
+                                               data_i.time_s
+                                               .map(lambda t:
+                                                    timedelta(seconds=
+                                                              max_time_s - t)))
+
+                # Step label from step label plugin.
+                metadata_i['step_label'] = step_label
+
+                # Cast metadata `unicode` fields as `str` to enable HDF export.
+                for k, v in metadata_i.iteritems():
+                    if isinstance(v, types.StringTypes):
+                        metadata_i[k] = str(v)
+
+                data_md_i = data_i.copy()
+
+                for i, (k, v) in enumerate(metadata_i.iteritems()):
+                    data_md_i.insert(i, k, v)
+
+                # Set order for known columns.  Unknown columns are ordered
+                # last, alphabetically.
+                column_order = ['experiment_id', 'experiment_uuid',
+                                'utc_timestamp', 'device_id', 'batch_id',
+                                'sample_id', 'step_label', 'step_number',
+                                'attempt_number', 'temperature_celsius',
+                                'relative_humidity', 'time_s', 'current_amps']
+                column_index = dict([(k, i) for i, k in
+                                     enumerate(column_order)])
+                ordered_columns = sorted(data_md_i.columns, key=lambda k:
+                                         (column_index
+                                          .get(k, len(column_order)), k))
+                data_md_i = data_md_i[ordered_columns]
+
+                namebase_i = ('e[{}]-d[{}]-s[{}]'
+                              .format(metadata_i['experiment_uuid'],
+                                      metadata_i.get('device_id'),
+                                      metadata_i.get('sample_id')))
+
+                # Append DStat experiment data to HDF file.
+                hdf_output_path = (app.experiment_log.get_log_path()
+                                   .joinpath(namebase_i + '.h5'))
+                data_md_i.to_hdf(str(hdf_output_path),
+                                 '/dstat_experiment_data', format='t',
+                                 data_columns=True, append=True)
+
+                # Append DStat experiment data to CSV file.
+                csv_output_path = (app.experiment_log.get_log_path()
+                                   .joinpath(namebase_i + '.csv'))
+                # Only include header if the file does not exist or is empty.
+                include_header = not (csv_output_path.isfile() and
+                                      (csv_output_path.size > 0))
+                with csv_output_path.open('a') as output:
+                    data_md_i.to_csv(output, index=False,
+                                     header=include_header)
 
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
@@ -477,5 +539,40 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             return False
         return True
 
+    def get_step_metadata(self):
+        '''
+        Returns
+        -------
+
+            (OrderedDict) : Contents of `self.metadata` dictionary, updated
+                with the additional fields `batch_id`, `step_number`,
+                `attempt_number`, `temperature_celsius`, `relative_humidity`.
+        '''
+        app = get_app()
+
+        # Construct dictionary of metadata for extra columns in the `pandas.DataFrame`.
+        metadata = self.metadata.copy()
+
+        cre_device_id = re.compile(r'#(?P<batch_id>[a-fA-F0-9]+)'
+                                r'%(?P<device_id>[a-fA-F0-9]+)$')
+        device_id = metadata.get('device_id', '')
+
+        # If `device_id` is in the form '#<batch-id>%<device-id>', extract batch and
+        # device identifiers separately.
+        match = cre_device_id.match(device_id)
+        if match:
+            metadata['device_id'] = str(match.group('device_id'))
+            metadata['batch_id'] = str(match.group('batch_id'))
+        else:
+            metadata['device_id'] = None
+            metadata['batch_id'] = None
+        metadata['step_number'] = app.protocol.current_step_number + 1
+        # Number of times the DStat experiment has been run for the current step.
+        metadata['attempt_number'] = (self.dstat_experiment_count_by_step
+                                      [app.protocol.current_step_number])
+        # Current temperature and humidity.
+        if self.has_environment_data:
+            metadata.update(self.dropbot_dx_remote.get_environment_state())
+        return metadata
 
 PluginGlobals.pop_env()
