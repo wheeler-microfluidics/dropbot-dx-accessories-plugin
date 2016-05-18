@@ -1,5 +1,5 @@
 """
-Copyright 2015 Christian Fobel
+Copyright 2015-2016 Christian Fobel and Ryan Fobel
 
 This file is part of dropbot_dx_plugin.
 
@@ -16,23 +16,25 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with dropbot_dx_plugin.  If not, see <http://www.gnu.org/licenses/>.
 """
+from datetime import timedelta
 from functools import wraps
 import itertools
 import logging
 import re
 import subprocess
 import sys, traceback
+import time
+import types
 
 import gtk
 from path_helpers import path
-from flatland import Boolean, Form, String, Float
-from flatland.validation import ValueAtLeast, ValueAtMost, Validator
+from flatland import Boolean, Float, Form
 from pygtkhelpers.ui.extra_widgets import Filepath
-from microdrop.plugin_helpers import (StepOptionsController,
+from microdrop.plugin_helpers import (AppDataController, StepOptionsController,
                                       get_plugin_info, hub_execute)
 from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
-                                      implements, emit_signal,
-                                      ScheduleRequest, get_service_instance_by_name)
+                                      ScheduleRequest, implements, emit_signal,
+                                      get_service_instance_by_name)
 from microdrop.app_context import get_app
 import dropbot_dx as dx
 import gobject
@@ -96,7 +98,7 @@ def get_unique_path(filepath):
     return filepath
 
 
-class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
+class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsController):
     """
     This class is automatically registered with the PluginManager.
     """
@@ -104,35 +106,10 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
     version = get_plugin_info(path(__file__).parent).version
     plugin_name = get_plugin_info(path(__file__).parent).plugin_name
 
-    '''
-    AppFields
-    ---------
-
-    A flatland Form specifying application options for the current plugin.
-    Note that nested Form objects are not supported.
-
-    Since we subclassed AppDataController, an API is available to access and
-    modify these attributes.  This API also provides some nice features
-    automatically:
-        -all fields listed here will be included in the app options dialog
-            (unless properties=dict(show_in_gui=False) is used)
-        -the values of these fields will be stored persistently in the microdrop
-            config file, in a section named after this plugin's name attribute
-    '''
-
-    # `StepFields`
-    # ------------
-
-    # A `flatland` `Form` specifying the per step options for the current
-    # plugin. Note that nested `Form` objects are not supported.
-
-    # Since we subclassed `StepOptionsController`, an API is available to
-    # access and modify these attributes.  This API also provides some nice
-    # features automatically:
-
-    #  - All fields listed here will be included in the protocol grid view
-    #    (unless `properties=dict(show_in_gui=False`) is used).
-    #  - The values of these fields will be stored persistently for each step.
+    AppFields = Form.of(Float.named('dstat_delay_s')
+                        .using(default=2., optional=True,
+                               properties={'title': 'Delay before D-stat '
+                                           'measurement (seconds)'}))
     StepFields = Form.of(Boolean.named('magnet_engaged').using(default=False,
                                                                optional=True),
                          Boolean.named('dstat_enabled').using(default=False,
@@ -144,7 +121,10 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         self.dstat_experiment_id = None  # UUID of active Dstat experiment
         self.dropbot_dx_remote = None  # `dropbot_dx.SerialProxy` instance
         self.initialized = False  # Latch to, e.g., config menus, only once
+        self._metadata = None
         self.has_environment_data = False
+        # Number of completed DStat experiments for each step.
+        self.dstat_experiment_count_by_step = {}
 
     def connect(self):
         '''
@@ -198,6 +178,45 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         '''
         return (self.dropbot_dx_remote is not None)
 
+    def get_schedule_requests(self, function_name):
+        """
+        Returns a list of scheduling requests (i.e., ScheduleRequest
+        instances) for the function specified by function_name.
+        """
+        if function_name in ['on_plugin_enable']:
+            return [ScheduleRequest('wheelerlab.dropbot_dx', self.name),
+                    ScheduleRequest('wheelerlab.dmf_control_board_plugin',
+                                    self.name)]
+        elif function_name == 'on_step_run':
+            return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
+                                    self.name)]
+        return []
+
+    ###########################################################################
+    # # Accessor methods #
+    def get_step_label(self):
+        try:
+            step_label_plugin =\
+                get_service_instance_by_name('wheelerlab.step_label_plugin')
+            return step_label_plugin.get_step_options().get('label')
+        except:
+            return None
+
+    @property
+    def metadata(self):
+        '''
+        Add experiment index and experiment UUID to metadata.
+        '''
+        metadata = self._metadata.copy() if self._metadata else {}
+        app = get_app()
+        metadata['experiment_id'] = app.experiment_log.experiment_id
+        metadata['experiment_uuid'] = app.experiment_log.uuid
+        return metadata
+
+    @metadata.setter
+    def metadata(self, value):
+        self._metadata = value
+
     ###########################################################################
     # # Menu callbacks #
     def on_edit_configuration(self, widget=None, data=None):
@@ -236,8 +255,8 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
                               properties={'patterns':
                                           [('Dstat parameters file (*.yml)',
                                             ('*.yml', ))]}))
-        dialog = FormViewDialog()
-        valid, response = dialog.run(form)
+        dialog = FormViewDialog(form, 'Set DStat parameters file')
+        valid, response = dialog.run()
 
         if valid:
             options['dstat_params_file'] = response['dstat_params_file']
@@ -245,6 +264,12 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
 
     ###########################################################################
     # # Plugin signal handlers #
+    def on_metadata_changed(self, original_metadata, metadata):
+        '''
+        Notify DStat interface of updates to the experiment metadata.
+        '''
+        self.metadata = metadata
+
     def on_plugin_enable(self):
         self.connect()
         if not self.initialized:
@@ -273,6 +298,7 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         self.tools_menu_item.show()
         if self.connected():
             self.edit_config_menu_item.show()
+        super(DropBotDxAccessoriesPlugin, self).on_plugin_enable()
 
     def on_plugin_disable(self):
         if self.connected():
@@ -318,8 +344,8 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         app = get_app()
         logger.info('[DropBotDxAccessoriesPlugin] on_step_run(): step #%d',
                     app.protocol.current_step_number)
-        # If `acquire` is `True`, start acquisition
         options = self.get_step_options()
+        app_values = self.get_app_values()
         if self.connected():
             self.dropbot_dx_remote.light_enabled = not options['dstat_enabled']
             self.dropbot_dx_remote.magnet_engaged=options['magnet_engaged']
@@ -335,17 +361,37 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
                 self.has_environment_data = False
 
             if options['dstat_enabled']:
+                # D-stat is enabled for step.  Request acquisition.
                 try:
                     if 'dstat_params_file' in options:
                         # Load Dstat parameters.
                         hub_execute('dstat-interface', 'load_params',
                                     params_path=options['dstat_params_file'])
-
                     if self.dstat_timeout_id is not None:
                         # Timer was already set, so cancel previous timer.
                         gobject.source_remove(self.dstat_timeout_id)
+                    # Delay before D-stat measurement (e.g., to allow webcam
+                    # light to turn off).
+                    dstat_delay_s = app_values.get('dstat_delay_s', 0)
+                    time.sleep(max(0, dstat_delay_s))
+                    step_label = self.get_step_label()
+                    # Send Microdrop step label (if available) to provide name
+                    # for DStat experiment.
+                    metadata = self.metadata.copy()
+                    metadata['name'] = (step_label if step_label else
+                                        str(app.protocol.current_step_number +
+                                            1))
+                    metadata['patient_id'] = metadata.get('sample_id', 'None')
+
+                    # Get target path for DStat database directory.
+                    dstat_database_path = (path(app.config['data_dir'])
+                                           .realpath().joinpath('dstat-db'))
                     self.dstat_experiment_id = \
-                        hub_execute('dstat-interface', 'run_active_experiment')
+                        hub_execute('dstat-interface', 'run_active_experiment',
+                                    metadata=metadata,
+                                    params={'db_path_entry':
+                                            str(dstat_database_path),
+                                            'db_enable_checkbutton': True})
                     self._dstat_spinner = itertools.cycle(r'-\|/')
                     print ''
                     # Check every 100ms to see if dstat acquisition has
@@ -387,21 +433,23 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
             if completed_timestamp is not None:
                 # ## Acquisition is complete ##
 
-                # ### Save results data and plot ###
                 app = get_app()
+
+                # Increment the number of completed DStat experiments for
+                # current step.
+                step_i = app.protocol.current_step_number
+                count_i = 1 + self.dstat_experiment_count_by_step.get(step_i,
+                                                                      0)
+                self.dstat_experiment_count_by_step[step_i] = count_i
+
+                # ### Save results data and plot ###
                 output_directory = (path(app.experiment_log.get_log_path())
                                     .abspath())
                 output_namebase = str(app.protocol.current_step_number)
 
-                try:
-                    step_label_plugin =\
-                        get_service_instance_by_name('wheelerlab'
-                                                     '.step_label_plugin')
-                    label = step_label_plugin.get_step_options().get('label')
-                    if label:
-                        output_namebase = label
-                except:
-                    pass
+                step_label = self.get_step_label()
+                if step_label is not None:
+                    output_namebase = step_label
 
                 # Save results to a text file in the experiment log directory.
                 output_txt_path = get_unique_path(output_directory
@@ -410,14 +458,66 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
                 logger.info('Save results to: %s', output_txt_path)
                 hub_execute('dstat-interface', 'save_text',
                             save_data_path=output_txt_path)
+                data_i = hub_execute('dstat-interface', 'get_experiment_data',
+                                     experiment_id=self.dstat_experiment_id)
+                metadata_i = self.get_step_metadata()
+                # Compute (approximate) `utc_timestamp` for each DStat
+                # measurement.
+                max_time_s = data_i.time_s.max()
+                metadata_i['utc_timestamp'] = (completed_timestamp -
+                                               data_i.time_s
+                                               .map(lambda t:
+                                                    timedelta(seconds=
+                                                              max_time_s - t)))
 
-                # Save results plot to a PDF in the experiment log directory.
-                output_pdf_path = get_unique_path(output_directory
-                                                  .joinpath(output_namebase +
-                                                            '.pdf'))
-                logger.info('Save plot to: %s', output_pdf_path)
-                hub_execute('dstat-interface', 'save_plot',
-                            save_plot_path=output_pdf_path)
+                # Step label from step label plugin.
+                metadata_i['step_label'] = step_label
+
+                # Cast metadata `unicode` fields as `str` to enable HDF export.
+                for k, v in metadata_i.iteritems():
+                    if isinstance(v, types.StringTypes):
+                        metadata_i[k] = str(v)
+
+                data_md_i = data_i.copy()
+
+                for i, (k, v) in enumerate(metadata_i.iteritems()):
+                    data_md_i.insert(i, k, v)
+
+                # Set order for known columns.  Unknown columns are ordered
+                # last, alphabetically.
+                column_order = ['experiment_id', 'experiment_uuid',
+                                'utc_timestamp', 'device_id', 'batch_id',
+                                'sample_id', 'step_label', 'step_number',
+                                'attempt_number', 'temperature_celsius',
+                                'relative_humidity', 'time_s', 'current_amps']
+                column_index = dict([(k, i) for i, k in
+                                     enumerate(column_order)])
+                ordered_columns = sorted(data_md_i.columns, key=lambda k:
+                                         (column_index
+                                          .get(k, len(column_order)), k))
+                data_md_i = data_md_i[ordered_columns]
+
+                namebase_i = ('e[{}]-d[{}]-s[{}]'
+                              .format(metadata_i['experiment_uuid'],
+                                      metadata_i.get('device_id'),
+                                      metadata_i.get('sample_id')))
+
+                # Append DStat experiment data to HDF file.
+                hdf_output_path = (app.experiment_log.get_log_path()
+                                   .joinpath(namebase_i + '.h5'))
+                data_md_i.to_hdf(str(hdf_output_path),
+                                 '/dstat_experiment_data', format='t',
+                                 data_columns=True, append=True)
+
+                # Append DStat experiment data to CSV file.
+                csv_output_path = (app.experiment_log.get_log_path()
+                                   .joinpath(namebase_i + '.csv'))
+                # Only include header if the file does not exist or is empty.
+                include_header = not (csv_output_path.isfile() and
+                                      (csv_output_path.size > 0))
+                with csv_output_path.open('a') as output:
+                    data_md_i.to_csv(output, index=False,
+                                     header=include_header)
 
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
@@ -447,9 +547,44 @@ class DropBotDxAccessoriesPlugin(Plugin, StepOptionsController):
         if function_name in ['on_plugin_enable']:
             return [ScheduleRequest('wheelerlab.dropbot_dx',
                                     self.name),
-                    ScheduleRequest('wheelerlab.dmf_control_board',
+                    ScheduleRequest('wheelerlab.dmf_control_board_plugin',
                                     self.name)]
         return []
 
+    def get_step_metadata(self):
+        '''
+        Returns
+        -------
+
+            (OrderedDict) : Contents of `self.metadata` dictionary, updated
+                with the additional fields `batch_id`, `step_number`,
+                `attempt_number`, `temperature_celsius`, `relative_humidity`.
+        '''
+        app = get_app()
+
+        # Construct dictionary of metadata for extra columns in the `pandas.DataFrame`.
+        metadata = self.metadata.copy()
+
+        cre_device_id = re.compile(r'#(?P<batch_id>[a-fA-F0-9]+)'
+                                r'%(?P<device_id>[a-fA-F0-9]+)$')
+        device_id = metadata.get('device_id', '')
+
+        # If `device_id` is in the form '#<batch-id>%<device-id>', extract batch and
+        # device identifiers separately.
+        match = cre_device_id.match(device_id)
+        if match:
+            metadata['device_id'] = str(match.group('device_id'))
+            metadata['batch_id'] = str(match.group('batch_id'))
+        else:
+            metadata['device_id'] = None
+            metadata['batch_id'] = None
+        metadata['step_number'] = app.protocol.current_step_number + 1
+        # Number of times the DStat experiment has been run for the current step.
+        metadata['attempt_number'] = (self.dstat_experiment_count_by_step
+                                      [app.protocol.current_step_number])
+        # Current temperature and humidity.
+        if self.has_environment_data:
+            metadata.update(self.dropbot_dx_remote.get_environment_state())
+        return metadata
 
 PluginGlobals.pop_env()
