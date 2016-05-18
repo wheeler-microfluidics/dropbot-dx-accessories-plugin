@@ -121,6 +121,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         self.initialized = False  # Latch to, e.g., config menus, only once
         self._metadata = None
         self.has_environment_data = False
+        # Number of completed DStat experiments for each step.
+        self.dstat_experiment_count_by_step = {}
 
     def connect(self):
         '''
@@ -429,8 +431,16 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             if completed_timestamp is not None:
                 # ## Acquisition is complete ##
 
-                # ### Save results data and plot ###
                 app = get_app()
+
+                # Increment the number of completed DStat experiments for
+                # current step.
+                step_i = app.protocol.current_step_number
+                count_i = 1 + self.dstat_experiment_count_by_step.get(step_i,
+                                                                      0)
+                self.dstat_experiment_count_by_step[step_i] = count_i
+
+                # ### Save results data and plot ###
                 output_directory = (path(app.experiment_log.get_log_path())
                                     .abspath())
                 output_namebase = str(app.protocol.current_step_number)
