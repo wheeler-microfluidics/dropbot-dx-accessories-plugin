@@ -559,14 +559,14 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
 
                 # Append DStat experiment data to HDF file.
                 hdf_output_path = (app.experiment_log.get_log_path()
-                                   .joinpath(namebase_i + '.h5'))
+                                   .joinpath(self.name, namebase_i + '.h5'))
                 data_md_i.to_hdf(str(hdf_output_path),
                                  '/dstat_experiment_data', format='t',
                                  data_columns=True, append=True)
 
                 # Append DStat experiment data to CSV file.
                 csv_output_path = (app.experiment_log.get_log_path()
-                                   .joinpath(namebase_i + '.csv'))
+                                   .joinpath(self.name, namebase_i + '.csv'))
                 # Only include header if the file does not exist or is empty.
                 include_header = not (csv_output_path.isfile() and
                                       (csv_output_path.size > 0))
