@@ -269,9 +269,28 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
     def _update_exp_log_metadata(self):
         app = get_app()
         app_values = self.get_app_values()
-        data = {'calibrator_file': app_values.get('calibrator_file', '')}
+        calibrator_file = app_values.get('calibrator_file', '')
+        data = {'calibrator_file': calibrator_file}
+
         if hasattr(app, 'experiment_log'):
             app.experiment_log.metadata[self.name] = data
+
+            # copy the calibrator file to the experiment log directory
+            if calibrator_file:
+                if not path(calibrator_file).isfile():
+                    logger.error('Calibration file (%s) does not exist.' %
+                                 calibrator_file)
+                else:
+                    try:
+                        output_path = path(app.experiment_log.get_log_path()) / self.name
+                        if not output_path.isdir():
+                            output_path.mkdir()
+                        path(calibrator_file).copy2(output_path / 'calibrator.csv')
+                    except:
+                        logger.error('Could not copy calibration file to the '
+                                     'experiment log directory.' , exc_info=True)
+
+
 
     ###########################################################################
     # # Plugin signal handlers #
