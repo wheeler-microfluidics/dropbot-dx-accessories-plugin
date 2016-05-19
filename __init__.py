@@ -431,10 +431,10 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                             'db_enable_checkbutton': True})
                     self._dstat_spinner = itertools.cycle(r'-\|/')
                     print ''
-                    # Check every 100ms to see if dstat acquisition has
+                    # Check every 250ms to see if dstat acquisition has
                     # completed.
                     self.dstat_timeout_id = \
-                        gobject.timeout_add(1000, self.check_dstat_status)
+                        gobject.timeout_add(250, self.check_dstat_status)
                 except:
                     print "Exception in user code:"
                     print '-'*60
