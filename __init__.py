@@ -431,8 +431,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                     print ''
                     # Check every 100ms to see if dstat acquisition has
                     # completed.
-                    self.dstat_timeout_id = gobject.timeout_add(100, self
-                                                          .check_dstat_status)
+                    self.dstat_timeout_id = \
+                        gobject.timeout_add(1000, self.check_dstat_status)
                 except:
                     print "Exception in user code:"
                     print '-'*60
