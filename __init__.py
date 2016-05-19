@@ -109,7 +109,11 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
     AppFields = Form.of(Float.named('dstat_delay_s')
                         .using(default=2., optional=True,
                                properties={'title': 'Delay before D-stat '
-                                           'measurement (seconds)'}))
+                                           'measurement (seconds)'}),
+                        Filepath.named('calibrator_file')
+                        .using(#pylint: disable-msg=E1120
+                               default='', optional=True,
+                               properties={'action': gtk.FILE_CHOOSER_ACTION_SAVE}))
     StepFields = Form.of(Boolean.named('magnet_engaged').using(default=False,
                                                                optional=True),
                          Boolean.named('dstat_enabled').using(default=False,
@@ -262,8 +266,23 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             options['dstat_params_file'] = response['dstat_params_file']
             self.set_step_values(options)
 
+    def _update_exp_log_metadata(self):
+        app = get_app()
+        app_values = self.get_app_values()
+        data = {'calibrator_file': app_values.get('calibrator_file', '')}
+        if hasattr(app, 'experiment_log'):
+            app.experiment_log.metadata[self.name] = data
+
     ###########################################################################
     # # Plugin signal handlers #
+    def on_experiment_log_changed(self, experiment_log):
+        self._update_exp_log_metadata()
+
+    def on_app_options_changed(self, plugin_name):
+        app = get_app()
+        if plugin_name == self.name:
+            self._update_exp_log_metadata()
+
     def on_metadata_changed(self, original_metadata, metadata):
         '''
         Notify DStat interface of updates to the experiment metadata.
@@ -549,6 +568,11 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                     self.name),
                     ScheduleRequest('wheelerlab.dmf_control_board_plugin',
                                     self.name)]
+        elif function_name == 'on_experiment_log_changed':
+            # Ensure that the app's reference to the new experiment log gets
+            # set.
+            return [ScheduleRequest('microdrop.app', self.name)]
+
         return []
 
     def get_step_metadata(self):
