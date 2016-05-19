@@ -18,6 +18,7 @@ along with dropbot_dx_plugin.  If not, see <http://www.gnu.org/licenses/>.
 """
 from datetime import timedelta
 from functools import wraps
+import datetime as dt
 import itertools
 import logging
 import re
@@ -295,12 +296,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
     ###########################################################################
     # # Plugin signal handlers #
     def on_experiment_log_changed(self, experiment_log):
-        self._update_exp_log_metadata()
-
-    def on_app_options_changed(self, plugin_name):
-        app = get_app()
-        if plugin_name == self.name:
-            self._update_exp_log_metadata()
+        # Reset number of completed DStat experiments for each step.
+        self.dstat_experiment_count_by_step = {}
 
     def on_metadata_changed(self, original_metadata, metadata):
         '''
@@ -494,6 +491,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                                   .joinpath(output_namebase +
                                                             '.txt'))
                 logger.info('Save results to: %s', output_txt_path)
+                dstat_params = hub_execute('dstat-interface', 'get_params')
                 hub_execute('dstat-interface', 'save_text',
                             save_data_path=output_txt_path)
                 data_i = hub_execute('dstat-interface', 'get_experiment_data',
@@ -511,6 +509,19 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 # Step label from step label plugin.
                 metadata_i['step_label'] = step_label
 
+                # Compute UTC start time from local experiment start time.
+                metadata_i['experiment_start'] = \
+                    (dt.datetime.fromtimestamp(app.experiment_log.start_time())
+                     + (dt.datetime.utcnow() - dt.datetime.now()))
+                # Compute UTC start time from local experiment start time.
+                metadata_i['experiment_length_min'] = \
+                    (completed_timestamp -
+                     metadata_i['experiment_start']).total_seconds() / 60.
+                # Record synchronous detection parameters from DStat (if set).
+                metadata_i['target_hz'] = dstat_params.get('sync_freq')
+                metadata_i['sample_frequency_hz'] = \
+                    dstat_params.get('adc_rate_hz')
+
                 # Cast metadata `unicode` fields as `str` to enable HDF export.
                 for k, v in metadata_i.iteritems():
                     if isinstance(v, types.StringTypes):
@@ -524,10 +535,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 # Set order for known columns.  Unknown columns are ordered
                 # last, alphabetically.
                 column_order = ['experiment_id', 'experiment_uuid',
+                                'experiment_start', 'experiment_length_min',
                                 'utc_timestamp', 'device_id', 'batch_id',
                                 'sample_id', 'step_label', 'step_number',
                                 'attempt_number', 'temperature_celsius',
-                                'relative_humidity', 'time_s', 'current_amps']
+                                'relative_humidity', 'target_hz',
+                                'sample_frequency_hz', 'time_s',
+                                'current_amps']
                 column_index = dict([(k, i) for i, k in
                                      enumerate(column_order)])
                 ordered_columns = sorted(data_md_i.columns, key=lambda k:
