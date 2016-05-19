@@ -195,6 +195,10 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         elif function_name == 'on_step_run':
             return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
                                     self.name)]
+        elif function_name == 'on_experiment_log_changed':
+            # Ensure that the app's reference to the new experiment log gets
+            # set.
+            return [ScheduleRequest('microdrop.app', self.name)]
         return []
 
     ###########################################################################
@@ -290,8 +294,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                     except:
                         logger.error('Could not copy calibration file to the '
                                      'experiment log directory.' , exc_info=True)
-
-
 
     ###########################################################################
     # # Plugin signal handlers #
@@ -591,23 +593,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             self.dstat_timeout_id = None
             return False
         return True
-
-    def get_schedule_requests(self, function_name):
-        """
-        Returns a list of scheduling requests (i.e., ScheduleRequest
-        instances) for the function specified by function_name.
-        """
-        if function_name in ['on_plugin_enable']:
-            return [ScheduleRequest('wheelerlab.dropbot_dx',
-                                    self.name),
-                    ScheduleRequest('wheelerlab.dmf_control_board_plugin',
-                                    self.name)]
-        elif function_name == 'on_experiment_log_changed':
-            # Ensure that the app's reference to the new experiment log gets
-            # set.
-            return [ScheduleRequest('microdrop.app', self.name)]
-
-        return []
 
     def get_step_metadata(self):
         '''
