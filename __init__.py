@@ -464,7 +464,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             completed_timestamp = hub_execute('dstat-interface',
                                               'acquisition_complete',
                                               experiment_id=
-                                              self.dstat_experiment_id)
+                                              self.dstat_experiment_id,
+                                              timeout_s=5.)
             if completed_timestamp is not None:
                 # ## Acquisition is complete ##
 
