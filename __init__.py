@@ -28,6 +28,7 @@ import time
 import types
 
 import gtk
+import pango
 from path_helpers import path
 from flatland import Boolean, Float, Form
 from pygtkhelpers.ui.extra_widgets import Filepath
@@ -38,15 +39,33 @@ from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 import dropbot_dx as dx
+import dropbot_elisa_analysis as ea
 import gobject
 from pygtkhelpers.ui.extra_dialogs import yesno, FormViewDialog
 from pygtkhelpers.utils import dict_to_form
 from arduino_helpers.upload import upload_firmware
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 PluginGlobals.push_env('microdrop.managed')
+
+
+def dataframe_display_dialog(df, message='', parent=None):
+    '''
+    Display a string representation of a `pandas.DataFrame` in a
+    `gtk.MessageDialog`.
+    '''
+    dialog = gtk.MessageDialog(parent, buttons=gtk.BUTTONS_OK)
+    label = dialog.props.message_area.get_children()[-1]
+    label.modify_font(pango.FontDescription('mono'))
+    dialog.props.text = message
+    dialog.props.secondary_text = df.to_string()
+    try:
+        return dialog.run()
+    finally:
+        dialog.destroy()
 
 
 def is_connected(_lambda):
@@ -130,6 +149,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         self.has_environment_data = False
         # Number of completed DStat experiments for each step.
         self.dstat_experiment_count_by_step = {}
+        self.dstat_experiment_data = None
 
     def connect(self):
         '''
@@ -182,6 +202,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             (bool) : `True` if dropbot-dx instrument is connected.
         '''
         return (self.dropbot_dx_remote is not None)
+
+    def data_dir(self):
+        app = get_app()
+        data_dir = app.experiment_log.get_log_path().joinpath(self.name)
+        if not data_dir.isdir():
+            data_dir.makedirs_p()
+        return data_dir
 
     def get_schedule_requests(self, function_name):
         """
@@ -300,6 +327,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
     def on_experiment_log_changed(self, experiment_log):
         # Reset number of completed DStat experiments for each step.
         self.dstat_experiment_count_by_step = {}
+        self.dstat_experiment_data = None
 
     def on_metadata_changed(self, original_metadata, metadata):
         '''
@@ -520,10 +548,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 metadata_i['experiment_length_min'] = \
                     (completed_timestamp -
                      metadata_i['experiment_start']).total_seconds() / 60.
+
                 # Record synchronous detection parameters from DStat (if set).
-                metadata_i['target_hz'] = dstat_params.get('sync_freq')
-                metadata_i['sample_frequency_hz'] = \
-                    dstat_params.get('adc_rate_hz')
+                if dstat_params['sync_true']:
+                    metadata_i['target_hz'] = float(dstat_params['sync_freq'])
+                else:
+                    metadata_i['target_hz'] = None
+                metadata_i['sample_frequency_hz'] = float(dstat_params['adc_rate_hz'])
 
                 # Cast metadata `unicode` fields as `str` to enable HDF export.
                 for k, v in metadata_i.iteritems():
@@ -557,22 +588,40 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                       metadata_i.get('device_id'),
                                       metadata_i.get('sample_id')))
 
-                # Append DStat experiment data to HDF file.
-                hdf_output_path = (app.experiment_log.get_log_path()
-                                   .joinpath(namebase_i + '.h5'))
-                data_md_i.to_hdf(str(hdf_output_path),
-                                 '/dstat_experiment_data', format='t',
-                                 data_columns=True, append=True)
+                if self.dstat_experiment_data is None:
+                    self.dstat_experiment_data = data_md_i
+                else:
+                    combined = pd.concat([self.dstat_experiment_data,
+                                          data_md_i])
+                    self.dstat_experiment_data = combined.reset_index(drop=
+                                                                      True)
 
                 # Append DStat experiment data to CSV file.
-                csv_output_path = (app.experiment_log.get_log_path()
-                                   .joinpath(namebase_i + '.csv'))
+                csv_output_path = self.data_dir().joinpath(namebase_i + '.csv')
                 # Only include header if the file does not exist or is empty.
                 include_header = not (csv_output_path.isfile() and
                                       (csv_output_path.size > 0))
                 with csv_output_path.open('a') as output:
                     data_md_i.to_csv(output, index=False,
                                      header=include_header)
+
+                # Generate DStat signal results summary, normalized against
+                # calibrator signal where applicable.
+                app_values = self.get_app_values()
+                calibrator_file = app_values.get('calibrator_file')
+                df_dstat_summary = \
+                    ea.microdrop_dstat_summary_table(self
+                                                     .dstat_experiment_data,
+                                                     calibrator_csv_path=
+                                                     calibrator_file)
+                # Write DStat summary table to CSV file.
+                csv_summary_path = self.data_dir().joinpath('dstat-summary'
+                                                            '.csv')
+                with csv_summary_path.open('w') as output:
+                    df_dstat_summary.to_csv(output)
+                # Display DStat summary table in dialog.
+                dataframe_display_dialog(df_dstat_summary, message='DStat '
+                                         'result summary')
 
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
