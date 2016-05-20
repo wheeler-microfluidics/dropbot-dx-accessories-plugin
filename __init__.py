@@ -201,6 +201,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         '''
         return (self.dropbot_dx_remote is not None)
 
+    def data_dir(self):
+        app = get_app()
+        data_dir = app.experiment_log.get_log_path().joinpath(self.name)
+        if not data_dir.isdir():
+            data_dir.makedirs_p()
+        return data_dir
+
     def get_schedule_requests(self, function_name):
         """
         Returns a list of scheduling requests (i.e., ScheduleRequest
@@ -579,15 +586,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                       metadata_i.get('sample_id')))
 
                 # Append DStat experiment data to HDF file.
-                hdf_output_path = (app.experiment_log.get_log_path()
-                                   .joinpath(self.name, namebase_i + '.h5'))
+                hdf_output_path = self.data_dir().joinpath(namebase_i + '.h5')
                 data_md_i.to_hdf(str(hdf_output_path),
                                  '/dstat_experiment_data', format='t',
                                  data_columns=True, append=True)
 
                 # Append DStat experiment data to CSV file.
-                csv_output_path = (app.experiment_log.get_log_path()
-                                   .joinpath(self.name, namebase_i + '.csv'))
+                csv_output_path = self.data_dir().joinpath(namebase_i + '.csv')
                 # Only include header if the file does not exist or is empty.
                 include_header = not (csv_output_path.isfile() and
                                       (csv_output_path.size > 0))
@@ -604,8 +609,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                                      calibrator_csv_path=
                                                      calibrator_file)
                 # Write DStat summary table to CSV file.
-                csv_summary_path = (app.experiment_log.get_log_path()
-                                    .joinpath(self.name, 'dstat-summary.csv'))
+                csv_summary_path = self.data_dir().joinpath('dstat-summary'
+                                                            '.csv')
                 with csv_summary_path.open('w') as output:
                     df_dstat_summary.to_csv(output)
                 # Display DStat summary table in dialog.
