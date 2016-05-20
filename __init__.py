@@ -223,9 +223,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
                                     self.name)]
         elif function_name == 'on_experiment_log_changed':
-            # Ensure that the app's reference to the new experiment log gets
-            # set.
-            return [ScheduleRequest('microdrop.app', self.name)]
+            # Ensure that the experiment_log_changed handler is called before the
+            # app starts a new experiment.
+            return [ScheduleRequest(self.name, 'microdrop.app')]
         return []
 
     ###########################################################################
@@ -298,13 +298,15 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             options['dstat_params_file'] = response['dstat_params_file']
             self.set_step_values(options)
 
-    def _update_exp_log_metadata(self):
+    ###########################################################################
+    # # Plugin signal handlers #
+    def on_experiment_log_changed(self, experiment_log):
         app = get_app()
         app_values = self.get_app_values()
         calibrator_file = app_values.get('calibrator_file', '')
         data = {'calibrator_file': calibrator_file}
 
-        if hasattr(app, 'experiment_log'):
+        if hasattr(app, 'experiment_log') and app.experiment_log:
             app.experiment_log.metadata[self.name] = data
 
             # copy the calibrator file to the experiment log directory
@@ -322,9 +324,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                         logger.error('Could not copy calibration file to the '
                                      'experiment log directory.' , exc_info=True)
 
-    ###########################################################################
-    # # Plugin signal handlers #
-    def on_experiment_log_changed(self, experiment_log):
         # Reset number of completed DStat experiments for each step.
         self.dstat_experiment_count_by_step = {}
         self.dstat_experiment_data = None
