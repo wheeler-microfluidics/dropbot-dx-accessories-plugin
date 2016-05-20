@@ -44,6 +44,7 @@ import gobject
 from pygtkhelpers.ui.extra_dialogs import yesno, FormViewDialog
 from pygtkhelpers.utils import dict_to_form
 from arduino_helpers.upload import upload_firmware
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         self.has_environment_data = False
         # Number of completed DStat experiments for each step.
         self.dstat_experiment_count_by_step = {}
+        self.dstat_experiment_data = None
 
     def connect(self):
         '''
@@ -325,6 +327,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
     def on_experiment_log_changed(self, experiment_log):
         # Reset number of completed DStat experiments for each step.
         self.dstat_experiment_count_by_step = {}
+        self.dstat_experiment_data = None
 
     def on_metadata_changed(self, original_metadata, metadata):
         '''
@@ -585,6 +588,14 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                       metadata_i.get('device_id'),
                                       metadata_i.get('sample_id')))
 
+                if self.dstat_experiment_data is None:
+                    self.dstat_experiment_data = data_md_i
+                else:
+                    combined = pd.concat([self.dstat_experiment_data,
+                                          data_md_i])
+                    self.dstat_experiment_data = combined.reset_index(drop=
+                                                                      True)
+
                 # Append DStat experiment data to CSV file.
                 csv_output_path = self.data_dir().joinpath(namebase_i + '.csv')
                 # Only include header if the file does not exist or is empty.
@@ -599,7 +610,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 app_values = self.get_app_values()
                 calibrator_file = app_values.get('calibrator_file')
                 df_dstat_summary = \
-                    ea.microdrop_dstat_summary_table(data_md_i,
+                    ea.microdrop_dstat_summary_table(self
+                                                     .dstat_experiment_data,
                                                      calibrator_csv_path=
                                                      calibrator_file)
                 # Write DStat summary table to CSV file.
