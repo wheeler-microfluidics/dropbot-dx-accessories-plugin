@@ -147,6 +147,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         self.initialized = False  # Latch to, e.g., config menus, only once
         self._metadata = None
         self.has_environment_data = False
+        self.environment_sensor_master = None
         # Number of completed DStat experiments for each step.
         self.dstat_experiment_count_by_step = {}
         self.dstat_experiment_data = None
@@ -155,6 +156,10 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         '''
         Connect to dropbot-dx instrument.
         '''
+        self.has_environment_data = False
+        self.environment_sensor_master = None
+
+
         # if the dropbot dx plugin is installed and enabled, try getting its
         # reference
         try:
@@ -186,13 +191,61 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 logger.warning('Could not connect to DropBot DX.')
 
         try:
-            env = self.dropbot_dx_remote.get_environment_state().to_dict()
+            env = self.get_environment_state(self.dropbot_dx_remote).to_dict()
             logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
                         (env['temperature_celsius'],
                          100 * env['relative_humidity']))
             self.has_environment_data = True
+            self.environment_sensor_master = self.dropbot_dx_remote
         except:
-            self.has_environment_data = False
+            service = get_service_instance_by_name('wheelerlab.dmf_control_board_plugin')
+            if service.enabled() and service.control_board.connected():
+                try:
+                    env = self.get_environment_state(service.control_board).to_dict()
+                    logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
+                                (env['temperature_celsius'],
+                                 100 * env['relative_humidity']))
+                    self.has_environment_data = True
+                    self.environment_sensor_master = service.control_board
+                except:
+                    pass
+
+    def get_environment_state(self, master=None, i2c_address=0x27):
+        '''
+        Acquire temperature and humidity from Honeywell HIH6000 series
+        sensor.
+
+        [1]: http://sensing.honeywell.com/index.php/ci_id/142171/la_id/1/document/1/re_id/0
+        '''
+        if master is None:
+            master = self.environment_sensor_master
+
+        # Trigger measurement.
+        master.i2c_write(i2c_address, [])
+        time.sleep(.01)
+
+        while True:
+            # Read 4 bytes from sensor.
+            humidity_data, temperature_data = master.i2c_read(i2c_address,
+                                                              4).view('>u2')
+            status_code = (humidity_data >> 14) & 0x03
+            if status_code == 0:
+                # Measurement completed successfully.
+                break
+            elif status_code > 1:
+                raise IOError('Error reading from sensor.')
+            # Measurement data is stale (i.e., measurement still in
+            # progress).  Try again.
+            time.sleep(.001)
+
+        # See URL from docstring for source of equations.
+        relative_humidity = float(humidity_data & 0x03FFF) / ((1 << 14) - 2)
+        temperature_celsius = (float((temperature_data >> 2) & 0x3FFF) /
+                               ((1 << 14) - 2) * 165 - 40)
+
+        return pd.Series([relative_humidity, temperature_celsius],
+                         index=['relative_humidity',
+                                'temperature_celsius'])
 
     def connected(self):
         '''
@@ -415,7 +468,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             self.dropbot_dx_remote.magnet_engaged=options['magnet_engaged']
             try:
                 if self.has_environment_data:
-                    env = self.dropbot_dx_remote.get_environment_state().to_dict()
+                    env = self.get_environment_state().to_dict()
                     logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
                                 (env['temperature_celsius'],
                                  100 * env['relative_humidity']))
@@ -675,7 +728,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                       [app.protocol.current_step_number])
         # Current temperature and humidity.
         if self.has_environment_data:
-            metadata.update(self.dropbot_dx_remote.get_environment_state())
+            metadata.update(self.get_environment_state())
         return metadata
 
 PluginGlobals.pop_env()
