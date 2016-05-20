@@ -272,9 +272,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             return pd.DataFrame(None)
         app_values = self.get_app_values()
         calibrator_file = app_values.get('calibrator_file')
-        return ea.microdrop_dstat_summary_table(self.dstat_experiment_data,
-                                                calibrator_csv_path=
-                                                calibrator_file, **kwargs)
+        df_dstat = ea.microdrop_dstat_summary_table(self.dstat_experiment_data,
+                                                    calibrator_csv_path=
+                                                    calibrator_file, **kwargs)
+        # Subtract respective background signal from each row in DStat results
+        # summary.  See `dropbot_elisa_analysis.subtract_background_signal` for
+        # more details.
+        return ea.subtract_background_signal(df_dstat)
 
     def get_step_metadata(self):
         '''
