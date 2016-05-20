@@ -28,6 +28,7 @@ import time
 import types
 
 import gtk
+import pango
 from path_helpers import path
 from flatland import Boolean, Float, Form
 from pygtkhelpers.ui.extra_widgets import Filepath
@@ -47,6 +48,22 @@ logger = logging.getLogger(__name__)
 
 
 PluginGlobals.push_env('microdrop.managed')
+
+
+def dataframe_display_dialog(df, message='', parent=None):
+    '''
+    Display a string representation of a `pandas.DataFrame` in a
+    `gtk.MessageDialog`.
+    '''
+    dialog = gtk.MessageDialog(parent, buttons=gtk.BUTTONS_OK)
+    label = dialog.props.message_area.get_children()[-1]
+    label.modify_font(pango.FontDescription('mono'))
+    dialog.props.text = message
+    dialog.props.secondary_text = df.to_string()
+    try:
+        return dialog.run()
+    finally:
+        dialog.destroy()
 
 
 def is_connected(_lambda):
@@ -573,6 +590,22 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 with csv_output_path.open('a') as output:
                     data_md_i.to_csv(output, index=False,
                                      header=include_header)
+
+                # Generate DStat signal results summary, normalized against
+                # calibrator signal where applicable.
+                app_values = self.get_app_values()
+                calibrator_file = app_values.get('calibrator_file')
+                df_dstat_summary = \
+                    ea.dstat_summary_table(data_md_i, calibrator_csv_path=
+                                           calibrator_file)
+                # Write DStat summary table to CSV file.
+                csv_summary_path = (app.experiment_log.get_log_path()
+                                    .joinpath(self.name, 'dstat-summary.csv'))
+                with csv_summary_path.open('w') as output:
+                    df_dstat_summary.to_csv(output)
+                # Display DStat summary table in dialog.
+                dataframe_display_dialog(df_dstat_summary, message='DStat '
+                                         'result summary')
 
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
