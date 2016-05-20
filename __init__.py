@@ -263,7 +263,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             data_dir.makedirs_p()
         return data_dir
 
-    def dstat_summary_frame(self):
+    def dstat_summary_frame(self, **kwargs):
         '''
         Generate DStat signal results summary, normalized against
         calibrator signal where applicable.
@@ -274,7 +274,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         calibrator_file = app_values.get('calibrator_file')
         return ea.microdrop_dstat_summary_table(self.dstat_experiment_data,
                                                 calibrator_csv_path=
-                                                calibrator_file)
+                                                calibrator_file, **kwargs)
 
     def get_step_metadata(self):
         '''
@@ -455,10 +455,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             self.tools_menu.append(menu_item)
             # Display DStat summary table in dialog.
             menu_item.connect("activate", lambda *args:
-                              dataframe_display_dialog(self
-                                                       .dstat_summary_frame(),
-                                                       message='DStat result '
-                                                       'summary'))
+                              dataframe_display_dialog
+                              (self.dstat_summary_frame(unit='n'),
+                               message='DStat result summary'))
             menu_item.show()
 
             menu_item = gtk.MenuItem("Set step Dstat parameters file...")
@@ -717,16 +716,12 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                     data_md_i.to_csv(output, index=False,
                                      header=include_header)
 
-                df_dstat_summary = self.dstat_summary_frame()
+                df_dstat_summary = self.dstat_summary_frame(numeric=True)
                 # Write DStat summary table to CSV file.
                 csv_summary_path = self.data_dir().joinpath('dstat-summary'
                                                             '.csv')
                 with csv_summary_path.open('w') as output:
                     df_dstat_summary.to_csv(output)
-
-                # Display DStat summary table in dialog.
-                dataframe_display_dialog(df_dstat_summary, message='DStat '
-                                         'result summary')
 
                 # Turn light back on after photomultiplier tube (PMT)
                 # measurement.
