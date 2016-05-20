@@ -537,10 +537,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 metadata_i['experiment_length_min'] = \
                     (completed_timestamp -
                      metadata_i['experiment_start']).total_seconds() / 60.
+
                 # Record synchronous detection parameters from DStat (if set).
-                metadata_i['target_hz'] = dstat_params.get('sync_freq')
-                metadata_i['sample_frequency_hz'] = \
-                    dstat_params.get('adc_rate_hz')
+                if dstat_params['sync_true']:
+                    metadata_i['target_hz'] = float(dstat_params['sync_freq'])
+                else:
+                    metadata_i['target_hz'] = None
+                metadata_i['sample_frequency_hz'] = float(dstat_params['adc_rate_hz'])
 
                 # Cast metadata `unicode` fields as `str` to enable HDF export.
                 for k, v in metadata_i.iteritems():
