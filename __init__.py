@@ -585,12 +585,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                                       metadata_i.get('device_id'),
                                       metadata_i.get('sample_id')))
 
-                # Append DStat experiment data to HDF file.
-                hdf_output_path = self.data_dir().joinpath(namebase_i + '.h5')
-                data_md_i.to_hdf(str(hdf_output_path),
-                                 '/dstat_experiment_data', format='t',
-                                 data_columns=True, append=True)
-
                 # Append DStat experiment data to CSV file.
                 csv_output_path = self.data_dir().joinpath(namebase_i + '.csv')
                 # Only include header if the file does not exist or is empty.
