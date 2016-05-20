@@ -39,6 +39,7 @@ from microdrop.plugin_manager import (PluginGlobals, Plugin, IPlugin,
                                       get_service_instance_by_name)
 from microdrop.app_context import get_app
 import dropbot_dx as dx
+import dropbot_elisa_analysis as ea
 import gobject
 from pygtkhelpers.ui.extra_dialogs import yesno, FormViewDialog
 from pygtkhelpers.utils import dict_to_form
@@ -599,8 +600,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 app_values = self.get_app_values()
                 calibrator_file = app_values.get('calibrator_file')
                 df_dstat_summary = \
-                    ea.dstat_summary_table(data_md_i, calibrator_csv_path=
-                                           calibrator_file)
+                    ea.microdrop_dstat_summary_table(data_md_i,
+                                                     calibrator_csv_path=
+                                                     calibrator_file)
                 # Write DStat summary table to CSV file.
                 csv_summary_path = (app.experiment_log.get_log_path()
                                     .joinpath(self.name, 'dstat-summary.csv'))
