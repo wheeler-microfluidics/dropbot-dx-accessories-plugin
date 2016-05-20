@@ -263,23 +263,54 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             data_dir.makedirs_p()
         return data_dir
 
-    def get_schedule_requests(self, function_name):
-        """
-        Returns a list of scheduling requests (i.e., ScheduleRequest
-        instances) for the function specified by function_name.
-        """
-        if function_name in ['on_plugin_enable']:
-            return [ScheduleRequest('wheelerlab.dropbot_dx', self.name),
-                    ScheduleRequest('wheelerlab.dmf_control_board_plugin',
-                                    self.name)]
-        elif function_name == 'on_step_run':
-            return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
-                                    self.name)]
-        elif function_name == 'on_experiment_log_changed':
-            # Ensure that the experiment_log_changed handler is called before the
-            # app starts a new experiment.
-            return [ScheduleRequest(self.name, 'microdrop.app')]
-        return []
+    def dstat_summary_frame(self):
+        '''
+        Generate DStat signal results summary, normalized against
+        calibrator signal where applicable.
+        '''
+        if self.dstat_experiment_data is None:
+            return pd.DataFrame(None)
+        app_values = self.get_app_values()
+        calibrator_file = app_values.get('calibrator_file')
+        return ea.microdrop_dstat_summary_table(self.dstat_experiment_data,
+                                                calibrator_csv_path=
+                                                calibrator_file)
+
+    def get_step_metadata(self):
+        '''
+        Returns
+        -------
+
+            (OrderedDict) : Contents of `self.metadata` dictionary, updated
+                with the additional fields `batch_id`, `step_number`,
+                `attempt_number`, `temperature_celsius`, `relative_humidity`.
+        '''
+        app = get_app()
+
+        # Construct dictionary of metadata for extra columns in the `pandas.DataFrame`.
+        metadata = self.metadata.copy()
+
+        cre_device_id = re.compile(r'#(?P<batch_id>[a-fA-F0-9]+)'
+                                r'%(?P<device_id>[a-fA-F0-9]+)$')
+        device_id = metadata.get('device_id', '')
+
+        # If `device_id` is in the form '#<batch-id>%<device-id>', extract batch and
+        # device identifiers separately.
+        match = cre_device_id.match(device_id)
+        if match:
+            metadata['device_id'] = str(match.group('device_id'))
+            metadata['batch_id'] = str(match.group('batch_id'))
+        else:
+            metadata['device_id'] = None
+            metadata['batch_id'] = None
+        metadata['step_number'] = app.protocol.current_step_number + 1
+        # Number of times the DStat experiment has been run for the current step.
+        metadata['attempt_number'] = (self.dstat_experiment_count_by_step
+                                      [app.protocol.current_step_number])
+        # Current temperature and humidity.
+        if self.has_environment_data:
+            metadata.update(self.get_environment_state())
+        return metadata
 
     ###########################################################################
     # # Accessor methods #
@@ -353,7 +384,29 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
 
     ###########################################################################
     # # Plugin signal handlers #
+    def get_schedule_requests(self, function_name):
+        """
+        Returns a list of scheduling requests (i.e., ScheduleRequest
+        instances) for the function specified by function_name.
+        """
+        if function_name in ['on_plugin_enable']:
+            return [ScheduleRequest('wheelerlab.dropbot_dx', self.name),
+                    ScheduleRequest('wheelerlab.dmf_control_board_plugin',
+                                    self.name)]
+        elif function_name == 'on_step_run':
+            return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
+                                    self.name)]
+        elif function_name == 'on_experiment_log_changed':
+            # Ensure that the app's reference to the new experiment log gets
+            # set.
+            return [ScheduleRequest('microdrop.app', self.name)]
+        return []
+
     def on_experiment_log_changed(self, experiment_log):
+        # Reset number of completed DStat experiments for each step.
+        self.dstat_experiment_count_by_step = {}
+        self.dstat_experiment_data = None
+
         app = get_app()
         app_values = self.get_app_values()
         calibrator_file = app_values.get('calibrator_file', '')
@@ -377,10 +430,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                         logger.error('Could not copy calibration file to the '
                                      'experiment log directory.' , exc_info=True)
 
-        # Reset number of completed DStat experiments for each step.
-        self.dstat_experiment_count_by_step = {}
-        self.dstat_experiment_data = None
-
     def on_metadata_changed(self, original_metadata, metadata):
         '''
         Notify DStat interface of updates to the experiment metadata.
@@ -401,6 +450,17 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             self.tools_menu.append(menu_item)
             menu_item.connect("activate", self.on_launch_dstat_interface)
             menu_item.show()
+
+            menu_item = gtk.MenuItem("View DStat results...")
+            self.tools_menu.append(menu_item)
+            # Display DStat summary table in dialog.
+            menu_item.connect("activate", lambda *args:
+                              dataframe_display_dialog(self
+                                                       .dstat_summary_frame(),
+                                                       message='DStat result '
+                                                       'summary'))
+            menu_item.show()
+
             menu_item = gtk.MenuItem("Set step Dstat parameters file...")
             self.tools_menu.append(menu_item)
             menu_item.connect("activate", self.on_set_dstat_params_file)
@@ -657,20 +717,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                     data_md_i.to_csv(output, index=False,
                                      header=include_header)
 
-                # Generate DStat signal results summary, normalized against
-                # calibrator signal where applicable.
-                app_values = self.get_app_values()
-                calibrator_file = app_values.get('calibrator_file')
-                df_dstat_summary = \
-                    ea.microdrop_dstat_summary_table(self
-                                                     .dstat_experiment_data,
-                                                     calibrator_csv_path=
-                                                     calibrator_file)
+                df_dstat_summary = self.dstat_summary_frame()
                 # Write DStat summary table to CSV file.
                 csv_summary_path = self.data_dir().joinpath('dstat-summary'
                                                             '.csv')
                 with csv_summary_path.open('w') as output:
                     df_dstat_summary.to_csv(output)
+
                 # Display DStat summary table in dialog.
                 dataframe_display_dialog(df_dstat_summary, message='DStat '
                                          'result summary')
@@ -695,40 +748,5 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             return False
         return True
 
-    def get_step_metadata(self):
-        '''
-        Returns
-        -------
-
-            (OrderedDict) : Contents of `self.metadata` dictionary, updated
-                with the additional fields `batch_id`, `step_number`,
-                `attempt_number`, `temperature_celsius`, `relative_humidity`.
-        '''
-        app = get_app()
-
-        # Construct dictionary of metadata for extra columns in the `pandas.DataFrame`.
-        metadata = self.metadata.copy()
-
-        cre_device_id = re.compile(r'#(?P<batch_id>[a-fA-F0-9]+)'
-                                r'%(?P<device_id>[a-fA-F0-9]+)$')
-        device_id = metadata.get('device_id', '')
-
-        # If `device_id` is in the form '#<batch-id>%<device-id>', extract batch and
-        # device identifiers separately.
-        match = cre_device_id.match(device_id)
-        if match:
-            metadata['device_id'] = str(match.group('device_id'))
-            metadata['batch_id'] = str(match.group('batch_id'))
-        else:
-            metadata['device_id'] = None
-            metadata['batch_id'] = None
-        metadata['step_number'] = app.protocol.current_step_number + 1
-        # Number of times the DStat experiment has been run for the current step.
-        metadata['attempt_number'] = (self.dstat_experiment_count_by_step
-                                      [app.protocol.current_step_number])
-        # Current temperature and humidity.
-        if self.has_environment_data:
-            metadata.update(self.get_environment_state())
-        return metadata
 
 PluginGlobals.pop_env()
