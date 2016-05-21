@@ -699,7 +699,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 data_md_i = data_md_i[ordered_columns]
 
                 namebase_i = ('e[{}]-d[{}]-s[{}]'
-                              .format(metadata_i['experiment_uuid'],
+                              .format(metadata_i['experiment_uuid'][:8],
                                       metadata_i.get('device_id'),
                                       metadata_i.get('sample_id')))
 
