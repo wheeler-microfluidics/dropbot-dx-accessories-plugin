@@ -151,6 +151,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         # Number of completed DStat experiments for each step.
         self.dstat_experiment_count_by_step = {}
         self.dstat_experiment_data = None
+        self.dropbot_dx_id = None
 
     def connect(self):
         '''
@@ -209,6 +210,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                     self.environment_sensor_master = service.control_board
                 except:
                     pass
+
+        # Get instrument identifier, if available.
+        self.dropbot_dx_id = getattr(self.dropbot_dx_remote, 'id', None)
 
     def get_environment_state(self, master=None, i2c_address=0x27):
         '''
@@ -328,6 +332,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         # Current temperature and humidity.
         if self.has_environment_data:
             metadata.update(self.get_environment_state())
+        # Instrument identifier.
+        metadata['instrument_id'] = self.dropbot_dx_id
         return metadata
 
     ###########################################################################
@@ -697,13 +703,13 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
 
                 # Set order for known columns.  Unknown columns are ordered
                 # last, alphabetically.
-                column_order = ['experiment_id', 'experiment_uuid',
-                                'experiment_start', 'experiment_length_min',
-                                'utc_timestamp', 'device_id', 'batch_id',
-                                'sample_id', 'step_label', 'step_number',
-                                'attempt_number', 'temperature_celsius',
-                                'relative_humidity', 'target_hz',
-                                'sample_frequency_hz', 'time_s',
+                column_order = ['instrument_id', 'experiment_id',
+                                'experiment_uuid', 'experiment_start',
+                                'experiment_length_min', 'utc_timestamp',
+                                'device_id', 'batch_id', 'sample_id',
+                                'step_label', 'step_number', 'attempt_number',
+                                'temperature_celsius', 'relative_humidity',
+                                'target_hz', 'sample_frequency_hz', 'time_s',
                                 'current_amps']
                 column_index = dict([(k, i) for i, k in
                                      enumerate(column_order)])
