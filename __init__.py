@@ -334,6 +334,11 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             metadata.update(self.get_environment_state())
         # Instrument identifier.
         metadata['instrument_id'] = self.dropbot_dx_id
+
+        if 'sample_id' not in metadata:
+            sample_labels = [str(v) for k, v in metadata.iteritems()
+                             if str(k).lower.starts_with('sample')]
+            metadata['sample_id'] = sample_labels.join(' and ')
         return metadata
 
     ###########################################################################
