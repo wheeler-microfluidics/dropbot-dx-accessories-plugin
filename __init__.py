@@ -20,6 +20,7 @@ from datetime import timedelta
 from functools import wraps
 import datetime as dt
 import itertools
+import json
 import logging
 import re
 import subprocess
@@ -459,10 +460,12 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                         logger.error('Could not copy calibration file to the '
                                      'experiment log directory.' , exc_info=True)
 
-    def on_metadata_changed(self, original_metadata, metadata):
+    def on_metadata_changed(self, schema, original_metadata, metadata):
         '''
         Notify DStat interface of updates to the experiment metadata.
         '''
+        metadata = metadata.copy()
+        metadata['metadata_schema'] = json.dumps(schema)
         self.metadata = metadata
 
     def on_plugin_enable(self):
