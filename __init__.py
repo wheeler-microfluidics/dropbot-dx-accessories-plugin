@@ -338,8 +338,8 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
 
         if 'sample_id' not in metadata:
             sample_labels = [str(v) for k, v in metadata.iteritems()
-                             if str(k).lower.starts_with('sample')]
-            metadata['sample_id'] = sample_labels.join(' and ')
+                             if str(k).lower().startswith('sample')]
+            metadata['sample_id'] = ' and '.join(sample_labels)
         return metadata
 
     ###########################################################################
