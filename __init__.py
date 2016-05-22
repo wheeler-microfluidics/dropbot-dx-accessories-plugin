@@ -706,7 +706,11 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
                 data_md_i = data_i.copy()
 
                 for i, (k, v) in enumerate(metadata_i.iteritems()):
-                    data_md_i.insert(i, k, v)
+                    try:
+                        data_md_i.insert(i, k, v)
+                    except Exception, e:
+                        logger.info('Skipping metadata field %s: %s.\n%s', k,
+                                    v, e)
 
                 # Set order for known columns.  Unknown columns are ordered
                 # last, alphabetically.
