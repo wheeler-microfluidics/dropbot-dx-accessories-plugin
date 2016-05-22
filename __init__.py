@@ -655,7 +655,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
 
                 step_label = self.get_step_label()
                 if step_label is not None:
-                    output_namebase = step_label
+                    # Replace characters that are not allowed in a filename
+                    # with underscore.
+                    output_namebase = re.sub(r'[:/\\\?{}]', '_', step_label)
 
                 # Save results to a text file in the experiment log directory.
                 output_txt_path = get_unique_path(output_directory
