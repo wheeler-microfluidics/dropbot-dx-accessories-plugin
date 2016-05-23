@@ -473,23 +473,14 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         if not self.initialized:
             app = get_app()
             self.tools_menu_item = gtk.MenuItem("DropBot DX")
-            app.main_window_controller.menu_tools.append(
-                self.tools_menu_item)
+            app.main_window_controller.menu_tools.append(self.tools_menu_item)
             self.tools_menu = gtk.Menu()
             self.tools_menu.show()
             self.tools_menu_item.set_submenu(self.tools_menu)
+
             menu_item = gtk.MenuItem("Launch Dstat interface")
             self.tools_menu.append(menu_item)
             menu_item.connect("activate", self.on_launch_dstat_interface)
-            menu_item.show()
-
-            menu_item = gtk.MenuItem("View DStat results...")
-            self.tools_menu.append(menu_item)
-            # Display DStat summary table in dialog.
-            menu_item.connect("activate", lambda *args:
-                              dataframe_display_dialog
-                              (self.dstat_summary_frame(unit='n'),
-                               message='DStat result summary'))
             menu_item.show()
 
             menu_item = gtk.MenuItem("Set step Dstat parameters file...")
@@ -501,9 +492,26 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             self.tools_menu.append(self.edit_config_menu_item)
             self.edit_config_menu_item.connect("activate",
                                                self.on_edit_configuration)
+
+            self.view_menu_item = gtk.MenuItem("DropBot DX")
+            app.main_window_controller.menu_view.append(self.view_menu_item)
+            self.view_menu = gtk.Menu()
+            self.view_menu.show()
+            self.view_menu_item.set_submenu(self.view_menu)
+
+            menu_item = gtk.MenuItem("View DStat results...")
+            self.view_menu.append(menu_item)
+            # Display DStat summary table in dialog.
+            menu_item.connect("activate", lambda *args:
+                              dataframe_display_dialog
+                              (self.dstat_summary_frame(unit='n'),
+                               message='DStat result summary'))
+            menu_item.show()
+
             self.initialized = True
 
         self.tools_menu_item.show()
+        self.view_menu_item.show()
         if self.connected():
             self.edit_config_menu_item.show()
         super(DropBotDxAccessoriesPlugin, self).on_plugin_enable()
