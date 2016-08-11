@@ -161,7 +161,6 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         self.has_environment_data = False
         self.environment_sensor_master = None
 
-
         # if the dropbot dx plugin is installed and enabled, try getting its
         # reference
         try:
@@ -230,9 +229,10 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         time.sleep(.01)
 
         while True:
-            # Read 4 bytes from sensor.
-            humidity_data, temperature_data = master.i2c_read(i2c_address,
-                                                              4).view('>u2')
+            # Read 4 bytes from sensor and cast as 2 16-bit integers with reversed
+            # byte order
+            humidity_data, temperature_data = master.i2c_read(i2c_address, 4) \
+                .astype('uint8').view('>u2')
             status_code = (humidity_data >> 14) & 0x03
             if status_code == 0:
                 # Measurement completed successfully.
