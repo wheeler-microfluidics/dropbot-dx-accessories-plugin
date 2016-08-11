@@ -518,7 +518,9 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
 
     def on_plugin_disable(self):
         if self.connected():
-            self.dropbot_dx_remote.terminate()
+            # delete to free up the serial port
+            del self.dropbot_dx_remote
+            self.dropbot_dx_remote = None
         self.tools_menu_item.hide()
 
     @is_connected
