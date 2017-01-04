@@ -191,25 +191,40 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
             except IOError:
                 logger.warning('Could not connect to DropBot DX.')
 
+        # Try to read temperature/humidity over i2c bus through a remote proxy
+        # --------------------------------------------------------------------
+        remote_proxies = [self.dropbot_dx_remote]
+
         try:
-            env = self.get_environment_state(self.dropbot_dx_remote).to_dict()
-            logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
-                        (env['temperature_celsius'],
-                         100 * env['relative_humidity']))
-            self.has_environment_data = True
-            self.environment_sensor_master = self.dropbot_dx_remote
-        except:
-            service = get_service_instance_by_name('wheelerlab.dmf_control_board_plugin')
+            service = get_service_instance_by_name('wheelerlab'
+                                                   '.dmf_control_board_plugin')
+        except KeyError:
+            # DropBot v2.0 control board plugin is not available.
+            pass
+        else:
             if service.enabled() and service.control_board.connected():
-                try:
-                    env = self.get_environment_state(service.control_board).to_dict()
-                    logger.info('temp=%.1fC, Rel. humidity=%.1f%%' %
-                                (env['temperature_celsius'],
-                                 100 * env['relative_humidity']))
-                    self.has_environment_data = True
-                    self.environment_sensor_master = service.control_board
-                except:
-                    pass
+                # The DropBot v2.0 control board plugin is loaded and the
+                # DropBot v2.0 control board is connected.
+                #
+                # Try to read temperature/humidity over i2c through control
+                # board first.
+                remote_proxies.insert(0, service.control_board)
+
+        # Try each proxy (in order) until the temperature/humidity is read
+        # successfully.
+        for proxy_i in remote_proxies:
+            try:
+                climate_info = self.get_environment_state(proxy_i)
+                logger.info('temp=%.1fC, Rel. humidity=%.1f%% (%s)',
+                            climate_info['temperature_celsius'],
+                            100 * climate_info['relative_humidity'], proxy_i)
+                # Cache remote proxy reference for future calls.
+                self.has_environment_data = True
+                self.environment_sensor_master = proxy_i
+                break
+            except:
+                # Try next remote proxy.
+                pass
 
         # Get instrument identifier, if available.
         self.dropbot_dx_id = getattr(self.dropbot_dx_remote, 'id', None)
