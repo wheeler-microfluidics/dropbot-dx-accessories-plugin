@@ -1,0 +1,49 @@
+# source will be downloaded prior to filling in jinja templates
+# Example assumes that this folder has setup.py in it
+source:
+  git_url: ../
+
+package:
+  name: dropbot_dx_accessories_plugin
+{% if GIT_DESCRIBE_NUMBER > '0' %}
+  version: {{ GIT_DESCRIBE_TAG[1:] }}.post{{ GIT_DESCRIBE_NUMBER }}
+{% else %}
+  version: {{ GIT_DESCRIBE_TAG[1:] }}
+{% endif %}
+
+build:
+  number: 0
+  script: python -m mpm.bin.build
+
+requirements:
+  build:
+    - arduino-helpers
+    - dropbot-dx >=1.2
+    - dropbot-elisa-analysis >=0.1
+    - dstat-interface-mrbox >=1.4.post1
+    - flatland-fork
+    - microdrop >=2.4
+    - microdrop-plugin-manager >=0.13
+    - pandas
+    - wheeler.pygtkhelpers >=0.13.post17
+    - zeo ==4.1.0
+
+  run:
+    - arduino-helpers
+    - dropbot-dx >=1.2
+    - dropbot-elisa-analysis >=0.1
+    - dstat-interface-mrbox >=1.4.post1
+    - flatland-fork
+    - microdrop >=2.4
+    - microdrop-plugin-manager >=0.13
+    - pandas
+    - wheeler.pygtkhelpers >=0.13.post17
+    - zeo ==4.1.0
+
+test:
+  commands:
+    - python -m mpm.bin.import_test -a {{ PKG_NAME }}
+
+about:
+  home: http://github.com/wheeler-microfluidics/dropbot-dx-accessories-plugin
+  license: BSD
