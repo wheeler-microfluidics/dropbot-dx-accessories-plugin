@@ -164,7 +164,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         # if the dropbot dx plugin is installed and enabled, try getting its
         # reference
         try:
-            service = get_service_instance_by_name('wheelerlab.dropbot_dx')
+            service = get_service_instance_by_name('dropbot_dx_plugin')
             if service.enabled():
                 self.dropbot_dx_remote = service.control_board
         except:
@@ -196,8 +196,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         remote_proxies = [self.dropbot_dx_remote]
 
         try:
-            service = get_service_instance_by_name('wheelerlab'
-                                                   '.dmf_control_board_plugin')
+            service = get_service_instance_by_name('dmf_control_board_plugin')
         except KeyError:
             # DropBot v2.0 control board plugin is not available.
             pass
@@ -362,7 +361,7 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
     def get_step_label(self):
         try:
             step_label_plugin =\
-                get_service_instance_by_name('wheelerlab.step_label_plugin')
+                get_service_instance_by_name('step_label_plugin')
             return step_label_plugin.get_step_options().get('label')
         except:
             return None
@@ -435,12 +434,10 @@ class DropBotDxAccessoriesPlugin(Plugin, AppDataController, StepOptionsControlle
         instances) for the function specified by function_name.
         """
         if function_name in ['on_plugin_enable']:
-            return [ScheduleRequest('wheelerlab.dropbot_dx', self.name),
-                    ScheduleRequest('wheelerlab.dmf_control_board_plugin',
-                                    self.name)]
+            return [ScheduleRequest('dropbot_dx_plugin', self.name),
+                    ScheduleRequest('dmf_control_board_plugin', self.name)]
         elif function_name == 'on_step_run':
-            return [ScheduleRequest('wheelerlab.dmf_device_ui_plugin',
-                                    self.name)]
+            return [ScheduleRequest('dmf_device_ui_plugin', self.name)]
         elif function_name == 'on_experiment_log_changed':
             # Ensure that the app's reference to the new experiment log gets
             # set.
