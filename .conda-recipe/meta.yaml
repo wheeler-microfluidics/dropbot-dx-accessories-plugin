@@ -52,5 +52,5 @@ test:
     - python -m mpm.bin.import_test -a {{ PKG_NAME }}
 
 about:
-  home: http://github.com/joshdahmer/dropbot-dx-accessories-plugin
+  home: http://github.com/wheeler-microfluidics/dropbot-dx-accessories-plugin
   license: GPL
