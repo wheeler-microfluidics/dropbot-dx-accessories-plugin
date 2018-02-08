@@ -1,0 +1,57 @@
+{% if GIT_DESCRIBE_NUMBER > '0' %}
+{% set GIT_VERSION = GIT_DESCRIBE_TAG[1:] + '.post' + GIT_DESCRIBE_NUMBER %}
+{% else %}
+{% set GIT_VERSION = GIT_DESCRIBE_TAG[1:] %}
+{% endif %}
+
+package:
+  name: microdrop.dropbot_dx_accessories_plugin
+  version: {{GIT_VERSION}}
+source:
+  git_url: ../
+build:
+  number: 0
+  script: python -m mpm.bin.build
+requirements:
+  build:
+    - flatland-fork
+    - microdrop >=2.0
+    - microdrop-plugin-template
+    - microdrop-utility
+    - pandas
+    - path_helpers >=0.2.post4
+    - pip-helpers
+    - pyyaml
+    - wheeler.pygtkhelpers
+    - zmq-plugin
+    - dropbot-dx >=1.2
+    - dropbot-elisa-analysis >=0.0.post18
+    - dstat-interface >=1.3.2.post9
+    - wheeler.pygtkhelpers >=0.13.post12
+    - ZEO ==4.1.0
+
+
+  run:
+    - flatland-fork
+    - microdrop >=2.0
+    - microdrop-plugin-template
+    - microdrop-utility
+    - pandas
+    - path_helpers >=0.2.post4
+    - pip-helpers
+    - pyyaml
+    - wheeler.pygtkhelpers
+    - zmq-plugin
+    - dropbot-dx >=1.2
+    - dropbot-elisa-analysis >=0.0.post18
+    - dstat-interface >=1.3.2.post9
+    - wheeler.pygtkhelpers >=0.13.post12
+    - ZEO ==4.1.0
+
+test:
+  commands:
+    - python -m mpm.bin.import_test -a {{ PKG_NAME }}
+
+about:
+  home: http://github.com/joshdahmer/dropbot-dx-accessories-plugin
+  license: GPL
