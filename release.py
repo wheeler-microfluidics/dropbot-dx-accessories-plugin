@@ -5,7 +5,7 @@ from microdrop_utility import Version
 from path_helpers import path
 
 package_name = 'dropbot_dx_accessories_plugin'
-plugin_name = 'mixrodrop.dropbot_dx_accessories'
+plugin_name = 'microdrop.dropbot_dx_accessories'
 
 # create a version sting based on the git revision/branch
 version = str(Version.from_git_repository())
